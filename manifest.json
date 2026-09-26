@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "GIF Frame Master",
+  "version": "1.0",
+  "description": "Editor avanzato per GIF: rimozione multipla frame, crop visivo e salvataggio personalizzato.",
+  "action": {},
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "activeTab"
+  ]
+}
