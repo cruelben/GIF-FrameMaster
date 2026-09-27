@@ -1,12 +1,14 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
 
     <meta name="viewport"
           content="width=device-width, initial-scale=1.0">
 
-    <title>GIF Frame Master</title>
+        <title>GIF Frame Master</title>
+
+    <link rel="icon" type="image/png" href="icon.png">
 
     <style>
         :root {
@@ -65,11 +67,16 @@
             align-items: center;
             justify-content: center;
 
-            background: #2563eb;
-            border-radius: 10px;
+            overflow: hidden;
 
-            font-size: 22px;
-            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
         }
 
         .header h1 {
@@ -84,6 +91,106 @@
             font-size: 13px;
         }
 
+        .header-link {
+            color: #9ca3af;
+            text-decoration: none;
+            font-size: 12px;
+            transition: 0.15s;
+        }
+
+        .header-link:hover {
+            color: #60a5fa;
+        }
+
+        /* =====================================================
+           TAB BAR
+        ===================================================== */
+
+        .tab-bar {
+            width: 100%;
+            background: #0b1120;
+            border-bottom: 1px solid #374151;
+
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+
+            padding: 8px 25px;
+
+            position: sticky;
+            top: 78px;
+            z-index: 90;
+        }
+
+        .tab-button {
+            padding: 9px 16px;
+
+            background: transparent;
+            color: #9ca3af;
+
+            border: 1px solid transparent;
+            border-radius: 7px;
+
+            font-size: 13px;
+            font-weight: 600;
+
+            cursor: pointer;
+
+            transition: 0.15s;
+
+            white-space: nowrap;
+        }
+
+        .tab-button:hover:not(:disabled) {
+            background: #1f2937;
+            color: #e5e7eb;
+        }
+
+        .tab-button.active {
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #2563eb;
+        }
+
+        .tab-button:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+
+        .tab-button .tab-counter {
+            display: inline-block;
+
+            margin-left: 6px;
+
+            padding: 1px 7px;
+
+            background: rgba(255, 255, 255, 0.15);
+
+            border-radius: 10px;
+
+            font-size: 11px;
+            font-weight: normal;
+        }
+
+        .tab-button.active .tab-counter {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .tab-button .tab-dot {
+            display: inline-block;
+
+            width: 7px;
+            height: 7px;
+
+            margin-left: 6px;
+
+            background: #facc15;
+
+            border-radius: 50%;
+
+            vertical-align: middle;
+        }
+
         /* =====================================================
            MAIN
         ===================================================== */
@@ -93,6 +200,18 @@
             max-width: 1500px;
             margin: 0 auto;
             padding: 25px;
+        }
+
+        /* =====================================================
+           TAB PANELS
+        ===================================================== */
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
         }
 
         /* =====================================================
@@ -111,6 +230,87 @@
             margin: 0 0 15px 0;
             font-size: 17px;
             font-weight: 600;
+        }
+
+        /* =====================================================
+           ERROR BOX
+        ===================================================== */
+
+        .error-box {
+            display: none;
+
+            margin-top: 15px;
+
+            padding: 12px 15px;
+
+            background: #3f1d1d;
+            border: 1px solid #b91c1c;
+            border-radius: 8px;
+
+            color: #fca5a5;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .error-box.visible {
+            display: block;
+        }
+
+        .error-box .error-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #fecaca;
+        }
+
+        .error-box details {
+            margin-top: 8px;
+        }
+
+        .error-box summary {
+            cursor: pointer;
+            color: #9ca3af;
+            font-size: 12px;
+        }
+
+        .error-box pre {
+            margin: 6px 0 0 0;
+
+            padding: 8px;
+
+            background: #111827;
+            border-radius: 5px;
+
+            color: #f87171;
+            font-size: 11px;
+
+            overflow-x: auto;
+
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        /* =====================================================
+           TAB NAV
+        ===================================================== */
+
+        .tab-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+
+            margin-top: 20px;
+            padding-top: 15px;
+
+            border-top: 1px solid #374151;
+        }
+
+        .tab-nav button {
+            min-width: 140px;
+        }
+
+        .tab-nav button.hidden {
+            visibility: hidden;
+            pointer-events: none;
         }
 
         /* =====================================================
@@ -179,10 +379,6 @@
         /* =====================================================
            WORKSPACE
         ===================================================== */
-
-        #workspace {
-            display: none;
-        }
 
         .toolbar {
             display: flex;
@@ -265,6 +461,16 @@
             color: #e5e7eb;
         }
 
+        .threshold-value {
+            display: inline-block;
+            min-width: 45px;
+
+            color: #60a5fa;
+            font-weight: 600;
+
+            text-align: right;
+        }
+
         /* =====================================================
            FRAME INFO
         ===================================================== */
@@ -287,6 +493,52 @@
 
         #frame-count {
             color: #60a5fa;
+        }
+
+        /* =====================================================
+           ANIMATED PREVIEW
+        ===================================================== */
+
+        .preview-anim {
+            background: #0b1120;
+
+            border: 1px solid #374151;
+            border-radius: 10px;
+
+            padding: 12px;
+
+            margin-bottom: 15px;
+
+            display: flex;
+            align-items: center;
+            gap: 15px;
+
+            flex-wrap: wrap;
+        }
+
+        .preview-anim canvas {
+            display: block;
+
+            background:
+                repeating-conic-gradient(
+                    #d1d5db 0% 25%,
+                    #ffffff 0% 50%
+                )
+                50% / 16px 16px;
+
+            border-radius: 6px;
+
+            max-width: 320px;
+            max-height: 240px;
+        }
+
+        .preview-anim-info {
+            color: #9ca3af;
+            font-size: 13px;
+        }
+
+        .preview-anim-info strong {
+            color: #e5e7eb;
         }
 
         /* =====================================================
@@ -382,12 +634,39 @@
         }
 
         /* =====================================================
-           IMPORT WORKSPACE (accodamento seconda GIF)
+           DRAG & DROP
         ===================================================== */
 
-        #import-workspace {
-            display: none;
+        .frame-card.dragging {
+            opacity: 0.45;
+            cursor: grabbing;
         }
+
+        .frame-card.drop-before::before,
+        .frame-card.drop-after::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: #60a5fa;
+            border-radius: 2px;
+            box-shadow: 0 0 6px rgba(96, 165, 250, 0.8);
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        .frame-card.drop-before::before {
+            top: -4px;
+        }
+
+        .frame-card.drop-after::after {
+            bottom: -4px;
+        }
+
+        /* =====================================================
+           IMPORT WORKSPACE
+        ===================================================== */
 
         .import-layout {
             display: grid;
@@ -416,12 +695,6 @@
             position: relative;
         }
 
-        /*
-            Finestra fissa: rappresenta le dimensioni
-            della GIF principale già caricata.
-            Il colore di sfondo viene impostato da app.js.
-        */
-
         #import-window {
             position: relative;
 
@@ -431,11 +704,6 @@
 
             border: 1px dashed #60a5fa;
         }
-
-        /*
-            Fotogramma della seconda GIF: trascinabile
-            e ridimensionabile (zoom) dentro la finestra.
-        */
 
         #import-drag-canvas {
             position: absolute;
@@ -453,10 +721,6 @@
         /* =====================================================
            CROP WORKSPACE
         ===================================================== */
-
-        #crop-workspace {
-            display: none;
-        }
 
         .crop-layout {
             display: grid;
@@ -507,11 +771,6 @@
                 )
                 50% / 16px 16px;
         }
-
-        /*
-            Rettangolo di selezione del crop.
-            Verrà gestito da app.js.
-        */
 
         #crop-selection {
             position: absolute;
@@ -571,7 +830,7 @@
         }
 
         /* =====================================================
-           CROP CONTROLS (riutilizzati anche per l'import)
+           CROP CONTROLS
         ===================================================== */
 
         .crop-controls {
@@ -652,10 +911,6 @@
         /* =====================================================
            EXPORT
         ===================================================== */
-
-        #export-workspace {
-            display: none;
-        }
 
         .export-area {
             display: flex;
@@ -758,6 +1013,16 @@
             .import-preview-outer {
                 min-height: 350px;
             }
+
+            .tab-bar {
+                top: 70px;
+                padding: 8px 15px;
+            }
+
+            .tab-button {
+                font-size: 12px;
+                padding: 8px 12px;
+            }
         }
 
         @media (max-width: 600px) {
@@ -782,6 +1047,12 @@
             .frame-card canvas {
                 max-height: 100px;
             }
+
+            .tab-nav button {
+                min-width: auto;
+                padding: 8px 10px;
+                font-size: 12px;
+            }
         }
     </style>
 </head>
@@ -797,20 +1068,98 @@
         <div class="header-title">
 
             <div class="logo">
-                GIF
+                <img src="icon.png" alt="GIF Frame Master">
             </div>
 
             <div>
                 <h1>GIF Frame Master</h1>
 
                 <div class="header-subtitle">
-                    Editor GIF · Frame-by-frame · Crop
+                    GIF editor · Frame-by-frame · Crop
                 </div>
             </div>
 
         </div>
 
+        <a
+            class="header-link"
+            href="https://cruelben.github.io/"
+            target="_blank"
+            rel="noopener noreferrer"
+        >
+            cruelben.github.io
+        </a>
+
     </header>
+
+
+    <!-- =====================================================
+         TAB BAR
+    ====================================================== -->
+
+    <nav class="tab-bar" id="tab-bar">
+
+        <button
+            class="tab-button active"
+            data-tab="load"
+            type="button"
+        >
+            1. Load
+        </button>
+
+        <button
+            class="tab-button"
+            data-tab="frames"
+            type="button"
+            disabled
+        >
+            2. Frames
+            <span
+                class="tab-counter"
+                id="tab-counter-frames"
+                style="display:none;"
+            ></span>
+        </button>
+
+        <button
+            class="tab-button"
+            data-tab="import"
+            type="button"
+            disabled
+            title="Available after choosing a GIF to append"
+        >
+            3. Queue
+        </button>
+
+        <button
+            class="tab-button"
+            data-tab="crop"
+            type="button"
+            disabled
+        >
+            4. Crop
+            <span
+                class="tab-counter"
+                id="tab-counter-crop"
+                style="display:none;"
+            ></span>
+            <span
+                class="tab-dot"
+                id="tab-dot-crop"
+                style="display:none;"
+            ></span>
+        </button>
+
+        <button
+            class="tab-button"
+            data-tab="export"
+            type="button"
+            disabled
+        >
+            5. Export
+        </button>
+
+    </nav>
 
 
     <!-- =====================================================
@@ -821,402 +1170,310 @@
 
 
         <!-- =================================================
-             CARICAMENTO GIF
-        ================================================== -->
-
-        <section class="card">
-
-            <h2 class="card-title">
-                1. Carica una GIF
-            </h2>
-
-            <div class="file-area">
-
-                <div class="file-icon">
-                    🎞️
-                </div>
-
-                <div class="file-description">
-                    Seleziona una GIF animata da modificare
-                </div>
-
-                <label for="gif-file" class="file-button">
-                    Seleziona GIF
-                </label>
-
-                <input
-                    type="file"
-                    id="gif-file"
-                    accept=".gif,image/gif"
-                >
-
-                <span id="loading">
-                    Elaborazione in corso...
-                </span>
-
-            </div>
-
-        </section>
-
-
-        <!-- =================================================
-             WORKSPACE FRAME
+             TAB 1: LOAD
         ================================================== -->
 
         <section
-            class="card"
-            id="workspace"
+            class="tab-panel active"
+            data-panel="load"
         >
 
-            <h2 class="card-title">
-                2. Gestione fotogrammi
-            </h2>
+            <div class="card" id="file-card">
 
+                <h2 class="card-title" id="file-card-title">
+                    1. Load a GIF
+                </h2>
 
-            <!-- TOOLBAR -->
+                <div class="file-area" id="file-area">
 
-            <div class="toolbar">
+                    <div class="file-icon">
+                        🎞️
+                    </div>
 
-                <button
-                    id="add-gif-queue"
-                    class="primary"
-                    type="button"
-                    title="Accoda i fotogrammi di un'altra GIF alla fine di questa"
-                >
-                    ➕ Aggiungi GIF in coda
-                </button>
+                    <div class="file-description" id="file-description">
+                        Select an animated GIF to edit
+                    </div>
 
-                <input
-                    type="file"
-                    id="import-gif-file"
-                    accept=".gif,image/gif"
-                    style="display:none;"
-                >
-
-                <div class="separator"></div>
-
-                <button
-                    id="select-all"
-                    type="button"
-                >
-                    Seleziona tutti
-                </button>
-
-                <button
-                    id="deselect-all"
-                    type="button"
-                >
-                    Deseleziona tutti
-                </button>
-
-                <button
-                    id="invert-selection"
-                    type="button"
-                >
-                    Inverti selezione
-                </button>
-
-                <button
-                    id="undo-action"
-                    type="button"
-                >
-                    ↩ Annulla
-                </button>
-
-                <div class="separator"></div>
-
-                <div class="inline-control">
-
-                    <label for="decimate-n">
-                        Ogni
+                    <label for="gif-file" class="file-button" id="gif-file-label">
+                        Select GIF
                     </label>
 
                     <input
-                        type="number"
-                        id="decimate-n"
-                        min="2"
-                        max="20"
-                        value="2"
+                        type="file"
+                        id="gif-file"
+                        accept=".gif,image/gif"
                     >
 
-                    <button
-                        id="decimate-frames"
-                        type="button"
-                    >
-                        Rimuovi 1 ogni N
-                    </button>
-
-                </div>
-
-                <div class="separator"></div>
-
-                <div class="inline-control">
-
-                    <button
-                        id="detect-duplicates"
-                        type="button"
-                    >
-                        Rileva duplicati
-                    </button>
-
-                    <label for="duplicate-threshold">
-                        Soglia
-                    </label>
-
-                    <input
-                        type="range"
-                        id="duplicate-threshold"
-                        min="0.5"
-                        max="15"
-                        step="0.5"
-                        value="3"
-                    >
-
-                </div>
-
-                <div class="separator"></div>
-
-                <button
-                    id="remove-selected"
-                    class="danger"
-                    type="button"
-                >
-                    Rimuovi selezionati dalla vista
-                </button>
-
-            </div>
-
-
-            <!-- INFO FRAME -->
-
-            <div class="frame-info">
-
-                <span id="frame-count">
-                    0 fotogrammi
-                </span>
-
-                <span>
-                    Dimensioni:
-                    <strong id="gif-dimensions">
-                        -
-                    </strong>
-                </span>
-
-                <span class="inline-control">
-
-                    <label for="thumb-size-slider">
-                        Anteprime
-                    </label>
-
-                    <input
-                        type="range"
-                        id="thumb-size-slider"
-                        min="80"
-                        max="260"
-                        step="10"
-                        value="80"
-                    >
-
-                    <span id="thumb-size-value">
-                        80px
+                    <span id="loading">
+                        Processing...
                     </span>
 
-                </span>
+                </div>
+
+                <div class="error-box" id="load-error-box">
+                    <div class="error-title">
+                        Could not load the GIF
+                    </div>
+                    <div id="load-error-message"></div>
+                    <details>
+                        <summary>Technical details</summary>
+                        <pre id="load-error-technical"></pre>
+                    </details>
+                </div>
 
             </div>
 
+            <div class="tab-nav">
 
-            <!-- GRIGLIA -->
+                <button
+                    class="hidden"
+                    type="button"
+                >
+                    ← Back
+                </button>
 
-            <div id="frames-grid"></div>
+                <button
+                    class="primary"
+                    type="button"
+                    data-next="frames"
+                    id="tab1-next"
+                    disabled
+                >
+                    Next →
+                </button>
 
-            <div
-                class="crop-help"
-                style="margin-top:10px;"
-            >
-                Doppio clic su un fotogramma per vederlo
-                a grandezza reale in una nuova scheda.
             </div>
 
         </section>
 
 
         <!-- =================================================
-             AGGIUNTA SECONDA GIF (accodamento)
+             TAB 2: FRAMES
         ================================================== -->
 
         <section
-            class="card"
-            id="import-workspace"
+            class="tab-panel"
+            data-panel="frames"
         >
 
-            <h2 class="card-title">
-                3. Aggiungi una GIF in coda
-            </h2>
+            <div class="card" id="workspace">
+
+                <h2 class="card-title">
+                    2. Frame management
+                </h2>
 
 
-            <div class="import-layout">
+                <!-- TOOLBAR -->
 
+                <div class="toolbar">
 
-                <!-- PREVIEW / POSIZIONAMENTO -->
-
-                <div class="import-preview-outer">
-
-                    <div id="import-window">
-
-                        <canvas
-                            id="import-drag-canvas"
-                        ></canvas>
-
-                    </div>
-
-                </div>
-
-
-                <!-- CONTROLLI -->
-
-                <div class="crop-controls">
-
-                    <div class="control-title">
-                        Posiziona il fotogramma
-                    </div>
-
-
-                    <div
-                        class="inline-control"
-                        style="margin-bottom:14px;"
+                    <button
+                        id="clear-all"
+                        class="danger"
+                        type="button"
+                        title="Remove everything and start over"
                     >
+                        🗑 Clear all
+                    </button>
 
-                        <label for="import-preview-frame">
-                            Fotogramma:
+                    <div class="separator"></div>
+
+                    <button id="select-all" type="button">
+                        Select all
+                    </button>
+
+                    <button id="deselect-all" type="button">
+                        Deselect all
+                    </button>
+
+                    <button id="invert-selection" type="button">
+                        Invert selection
+                    </button>
+
+                    <button id="undo-action" type="button">
+                        ↩ Undo
+                    </button>
+
+                    <div class="separator"></div>
+
+                    <div class="inline-control">
+
+                        <label for="decimate-n">
+                            Every
                         </label>
 
                         <input
                             type="number"
-                            id="import-preview-frame"
-                            min="1"
-                            value="1"
-                            style="width:65px; padding:6px; border-radius:6px; border:1px solid #4b5563; background:#1f2937; color:#e5e7eb;"
+                            id="decimate-n"
+                            min="2"
+                            max="20"
+                            value="2"
                         >
 
                         <button
-                            id="import-preview-refresh"
+                            id="decimate-frames"
                             type="button"
-                            title="Aggiorna anteprima"
                         >
-                            ⟳
+                            Remove 1 every N
                         </button>
 
                     </div>
 
+                    <div class="separator"></div>
 
-                    <div
-                        class="inline-control"
-                        style="margin-bottom:14px;"
-                    >
+                    <div class="inline-control">
 
-                        <label for="import-zoom">
-                            Zoom
+                        <button
+                            id="detect-duplicates"
+                            type="button"
+                        >
+                            Detect duplicates
+                        </button>
+
+                        <label for="duplicate-threshold">
+                            Threshold
                         </label>
 
                         <input
                             type="range"
-                            id="import-zoom"
-                            min="0.05"
-                            max="5"
-                            step="0.01"
-                            value="1"
+                            id="duplicate-threshold"
+                            min="0.5"
+                            max="15"
+                            step="0.5"
+                            value="1.5"
                         >
+
+                        <span
+                            class="threshold-value"
+                            id="duplicate-threshold-value"
+                        >
+                            1.5%
+                        </span>
 
                     </div>
 
+                    <div class="separator"></div>
 
-                    <div
-                        class="inline-control"
-                        style="margin-bottom:14px;"
+                    <button
+                        id="remove-selected"
+                        class="danger"
+                        type="button"
                     >
+                        Remove selected from view
+                    </button>
 
-                        <label for="import-bgcolor">
-                            Colore di sfondo
+                </div>
+
+
+                <!-- ANIMATED PREVIEW -->
+
+                <div class="preview-anim">
+
+                    <canvas id="preview-anim-canvas"></canvas>
+
+                    <div class="preview-anim-info">
+
+                        <button
+                            id="preview-anim-toggle"
+                            class="primary"
+                            type="button"
+                        >
+                            ▶ Play
+                        </button>
+
+                        <div style="margin-top:10px;">
+
+                            Frame:
+                            <strong id="preview-anim-frame">
+                                -
+                            </strong>
+
+                            <br>
+
+                            Delay:
+                            <strong id="preview-anim-delay">
+                                -
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- INFO FRAME -->
+
+                <div class="frame-info">
+
+                    <span id="frame-count">
+                        0 frames
+                    </span>
+
+                    <span>
+                        Size:
+                        <strong id="gif-dimensions">
+                            -
+                        </strong>
+                    </span>
+
+                    <span class="inline-control">
+
+                        <label for="thumb-size-slider">
+                            Thumbnails
                         </label>
 
                         <input
-                            type="color"
-                            id="import-bgcolor"
-                            value="#ffffff"
+                            type="range"
+                            id="thumb-size-slider"
+                            min="80"
+                            max="260"
+                            step="10"
+                            value="80"
                         >
 
-                    </div>
+                        <span id="thumb-size-value">
+                            80px
+                        </span>
 
-
-                    <div
-                        class="toolbar"
-                        style="margin-bottom:14px;"
-                    >
-
-                        <button
-                            id="import-preset-cover"
-                            type="button"
-                        >
-                            Adatta riempiendo
-                        </button>
-
-                        <button
-                            id="import-preset-contain"
-                            type="button"
-                        >
-                            Adatta con margini
-                        </button>
-
-                    </div>
-
-
-                    <div
-                        class="toolbar"
-                        style="margin-bottom:0;"
-                    >
-
-                        <button
-                            id="import-confirm"
-                            class="success"
-                            type="button"
-                        >
-                            ✔ Conferma e accoda
-                        </button>
-
-                        <button
-                            id="import-cancel"
-                            class="danger"
-                            type="button"
-                        >
-                            Annulla
-                        </button>
-
-                    </div>
-
-
-                    <div class="crop-help">
-
-                        Trascina l'immagine per posizionarla
-                        e usa lo zoom per ingrandirla o
-                        rimpicciolirla.
-
-                        <br><br>
-
-                        L'area visibile corrisponde alle
-                        dimensioni della GIF già caricata
-                        (<strong id="import-target-dims">-</strong>),
-                        che restano fisse.
-
-                        <br><br>
-
-                        I nuovi fotogrammi verranno accodati
-                        dopo quelli già presenti, mantenendo
-                        i propri tempi originali.
-
-                    </div>
+                    </span>
 
                 </div>
+
+
+                <!-- GRIGLIA -->
+
+                <div id="frames-grid"></div>
+
+                <div
+                    class="crop-help"
+                    style="margin-top:10px;"
+                >
+                    Double-click a frame to open it at real
+                    size in a new tab.
+                    <br>
+                    Drag a frame (or a selected group)
+                    to reorder them.
+                </div>
+
+            </div>
+
+            <div class="tab-nav">
+
+                <button
+                    type="button"
+                    data-prev="load"
+                >
+                    ← Back
+                </button>
+
+                <button
+                    class="primary"
+                    type="button"
+                    data-next="crop"
+                >
+                    Next →
+                </button>
 
             </div>
 
@@ -1224,296 +1481,482 @@
 
 
         <!-- =================================================
-             CROP
+             TAB 3: QUEUE
         ================================================== -->
 
         <section
-            class="card"
-            id="crop-workspace"
+            class="tab-panel"
+            data-panel="import"
         >
 
-            <h2 class="card-title">
-                4. Ritaglio GIF
-            </h2>
-
-
-            <div class="crop-layout">
-
-
-                <!-- PREVIEW -->
-
-                <div class="crop-preview">
-
-                    <div id="crop-container">
-
-                        <canvas
-                            id="crop-canvas"
-                        ></canvas>
-
-                        <div
-                            id="crop-selection"
-                        >
-
-                            <div
-                                class="crop-handle handle-nw"
-                                data-handle="nw"
-                            ></div>
-
-                            <div
-                                class="crop-handle handle-ne"
-                                data-handle="ne"
-                            ></div>
-
-                            <div
-                                class="crop-handle handle-sw"
-                                data-handle="sw"
-                            ></div>
-
-                            <div
-                                class="crop-handle handle-se"
-                                data-handle="se"
-                            ></div>
-
-                        </div>
-
-                    </div>
-
-                </div>
-
-
-                <!-- CONTROLLI -->
-
-                <div class="crop-controls">
-
-                    <div class="control-title">
-                        Area di ritaglio
-                    </div>
-
-
-                    <div class="coordinate-grid">
-
-
-                        <div class="coordinate">
-
-                            <span class="coordinate-label">
-                                X
-                            </span>
-
-                            <span
-                                class="coordinate-value"
-                                id="crop-x"
-                            >
-                                0
-                            </span>
-
-                        </div>
-
-
-                        <div class="coordinate">
-
-                            <span class="coordinate-label">
-                                Y
-                            </span>
-
-                            <span
-                                class="coordinate-value"
-                                id="crop-y"
-                            >
-                                0
-                            </span>
-
-                        </div>
-
-
-                        <div class="coordinate">
-
-                            <span class="coordinate-label">
-                                Larghezza
-                            </span>
-
-                            <span
-                                class="coordinate-value"
-                                id="crop-width"
-                            >
-                                0
-                            </span>
-
-                        </div>
-
-
-                        <div class="coordinate">
-
-                            <span class="coordinate-label">
-                                Altezza
-                            </span>
-
-                            <span
-                                class="coordinate-value"
-                                id="crop-height"
-                            >
-                                0
-                            </span>
-
-                        </div>
-
-                    </div>
-
-
-                    <button
-                        id="reset-crop"
-                        type="button"
-                    >
-                        Ripristina crop
-                    </button>
-
-
-                    <div
-                        class="control-title"
-                        style="margin-top:15px; font-size:13px;"
-                    >
-                        Fotogramma da mostrare
-                    </div>
-
-                    <div class="inline-control">
-
-                        <input
-                            type="number"
-                            id="crop-preview-frame"
-                            min="1"
-                            value="1"
-                            style="width:65px; padding:6px; border-radius:6px; border:1px solid #4b5563; background:#1f2937; color:#e5e7eb;"
-                        >
-
-                        <button
-                            id="crop-preview-refresh"
-                            type="button"
-                            title="Aggiorna anteprima"
-                        >
-                            ⟳
-                        </button>
-
-                    </div>
-
-
-                    <div class="crop-help">
-
-                        Trascina il rettangolo per
-                        spostare l'area di ritaglio.
-
-                        <br><br>
-
-                        Trascina uno degli angoli per
-                        modificarne dimensioni e posizione.
-
-                        <br><br>
-
-                        Il ritaglio verrà applicato a
-                        tutti i fotogrammi utilizzati
-                        nell'esportazione.
-
-                    </div>
-
-                </div>
-
-            </div>
-
-        </section>
-
-
-        <!-- =================================================
-             ESPORTAZIONE
-        ================================================== -->
-
-        <section
-            class="card"
-            id="export-workspace"
-        >
-
-            <h2 class="card-title">
-                5. Esporta GIF
-            </h2>
-
-
-            <div class="frame-info">
-
-                <label for="speed-slider">
-                    <strong>Velocità:</strong>
-                </label>
-
-                <input
-                    type="range"
-                    id="speed-slider"
-                    min="0.5"
-                    max="2"
-                    step="0.1"
-                    value="1"
+            <div class="card" id="import-workspace">
+
+                <h2 class="card-title">
+                    3. Add a GIF to the queue
+                </h2>
+
+                <div
+                    class="import-layout"
+                    id="import-panel"
                 >
 
-                <span id="speed-value">1.0x</span>
+                    <div class="import-preview-outer">
 
-                <span id="speed-delay-preview"></span>
+                        <div id="import-window">
+
+                            <canvas
+                                id="import-drag-canvas"
+                            ></canvas>
+
+                        </div>
+
+                    </div>
+
+                    <div class="crop-controls">
+
+                        <div class="control-title">
+                            Position the frame
+                        </div>
+
+                        <div
+                            class="inline-control"
+                            style="margin-bottom:14px;"
+                        >
+
+                            <label for="import-preview-frame">
+                                Frame:
+                            </label>
+
+                            <input
+                                type="number"
+                                id="import-preview-frame"
+                                min="1"
+                                value="1"
+                                style="width:65px; padding:6px; border-radius:6px; border:1px solid #4b5563; background:#1f2937; color:#e5e7eb;"
+                            >
+
+                            <button
+                                id="import-preview-refresh"
+                                type="button"
+                                title="Refresh preview"
+                            >
+                                ⟳
+                            </button>
+
+                        </div>
+
+                        <div
+                            class="inline-control"
+                            style="margin-bottom:14px;"
+                        >
+
+                            <label for="import-zoom">
+                                Zoom
+                            </label>
+
+                            <input
+                                type="range"
+                                id="import-zoom"
+                                min="0.05"
+                                max="5"
+                                step="0.01"
+                                value="1"
+                            >
+
+                        </div>
+
+                        <div
+                            class="inline-control"
+                            style="margin-bottom:14px;"
+                        >
+
+                            <label for="import-bgcolor">
+                                Background color
+                            </label>
+
+                            <input
+                                type="color"
+                                id="import-bgcolor"
+                                value="#ffffff"
+                            >
+
+                        </div>
+
+                        <div
+                            class="toolbar"
+                            style="margin-bottom:14px;"
+                        >
+
+                            <button
+                                id="import-preset-cover"
+                                type="button"
+                            >
+                                Fit: cover
+                            </button>
+
+                            <button
+                                id="import-preset-contain"
+                                type="button"
+                            >
+                                Fit: contain
+                            </button>
+
+                        </div>
+
+                        <div
+                            class="toolbar"
+                            style="margin-bottom:0;"
+                        >
+
+                            <button
+                                id="import-confirm"
+                                class="success"
+                                type="button"
+                            >
+                                ✔ Confirm and append
+                            </button>
+
+                            <button
+                                id="import-cancel"
+                                class="danger"
+                                type="button"
+                            >
+                                Cancel
+                            </button>
+
+                        </div>
+
+                        <div class="crop-help">
+
+                            Drag the image to position it
+                            and use zoom to scale it up or
+                            down.
+
+                            <br><br>
+
+                            The visible area matches the
+                            size of the already loaded GIF
+                            (<strong id="import-target-dims">-</strong>),
+                            which stays fixed.
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="error-box" id="import-error-box">
+                    <div class="error-title">
+                        Could not append the GIF
+                    </div>
+                    <div id="import-error-message"></div>
+                    <details>
+                        <summary>Technical details</summary>
+                        <pre id="import-error-technical"></pre>
+                    </details>
+                </div>
 
             </div>
 
+            <div class="tab-nav">
 
-            <div class="export-options">
+                <button
+                    type="button"
+                    data-prev="frames"
+                >
+                    ← Back
+                </button>
 
-                <label for="pingpong-toggle">
+                <button
+                    class="primary"
+                    type="button"
+                    data-next="crop"
+                >
+                    Next →
+                </button>
 
-                    <input
-                        type="checkbox"
-                        id="pingpong-toggle"
-                    >
+            </div>
 
-                    Effetto ping-pong (avanti-indietro)
+        </section>
 
-                </label>
 
-                <label for="export-quality">
+        <!-- =================================================
+             TAB 4: CROP
+        ================================================== -->
 
-                    Qualità/peso:
+        <section
+            class="tab-panel"
+            data-panel="crop"
+        >
+
+            <div class="card" id="crop-workspace">
+
+                <h2 class="card-title">
+                    4. Crop GIF
+                </h2>
+
+                <div class="crop-layout">
+
+                    <div class="crop-preview">
+
+                        <div id="crop-container">
+
+                            <canvas
+                                id="crop-canvas"
+                            ></canvas>
+
+                            <div id="crop-selection">
+
+                                <div
+                                    class="crop-handle handle-nw"
+                                    data-handle="nw"
+                                ></div>
+
+                                <div
+                                    class="crop-handle handle-ne"
+                                    data-handle="ne"
+                                ></div>
+
+                                <div
+                                    class="crop-handle handle-sw"
+                                    data-handle="sw"
+                                ></div>
+
+                                <div
+                                    class="crop-handle handle-se"
+                                    data-handle="se"
+                                ></div>
+
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <div class="crop-controls">
+
+                        <div class="control-title">
+                            Crop area
+                        </div>
+
+                        <div class="coordinate-grid">
+
+                            <div class="coordinate">
+                                <span class="coordinate-label">X</span>
+                                <span class="coordinate-value" id="crop-x">0</span>
+                            </div>
+
+                            <div class="coordinate">
+                                <span class="coordinate-label">Y</span>
+                                <span class="coordinate-value" id="crop-y">0</span>
+                            </div>
+
+                            <div class="coordinate">
+                                <span class="coordinate-label">Width</span>
+                                <span class="coordinate-value" id="crop-width">0</span>
+                            </div>
+
+                            <div class="coordinate">
+                                <span class="coordinate-label">Height</span>
+                                <span class="coordinate-value" id="crop-height">0</span>
+                            </div>
+
+                        </div>
+
+                        <button id="reset-crop" type="button">
+                            Reset crop
+                        </button>
+
+                        <div
+                            class="control-title"
+                            style="margin-top:15px; font-size:13px;"
+                        >
+                            Preview frame
+                        </div>
+
+                        <div class="inline-control">
+
+                            <input
+                                type="number"
+                                id="crop-preview-frame"
+                                min="1"
+                                value="1"
+                                style="width:65px; padding:6px; border-radius:6px; border:1px solid #4b5563; background:#1f2937; color:#e5e7eb;"
+                            >
+
+                            <button
+                                id="crop-preview-refresh"
+                                type="button"
+                                title="Refresh preview"
+                            >
+                                ⟳
+                            </button>
+
+                        </div>
+
+                        <div class="crop-help">
+
+                            Drag the rectangle to move the
+                            crop area.
+
+                            <br><br>
+
+                            Drag one of the corners to
+                            resize it.
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <div class="tab-nav">
+
+                <button
+                    type="button"
+                    data-prev="frames"
+                >
+                    ← Back
+                </button>
+
+                <button
+                    class="primary"
+                    type="button"
+                    data-next="export"
+                >
+                    Next →
+                </button>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             TAB 5: EXPORT
+        ================================================== -->
+
+        <section
+            class="tab-panel"
+            data-panel="export"
+        >
+
+            <div class="card" id="export-workspace">
+
+                <h2 class="card-title">
+                    5. Export GIF
+                </h2>
+
+                <div class="frame-info">
+
+                    <label for="speed-slider">
+                        <strong>Speed:</strong>
+                    </label>
 
                     <input
                         type="range"
-                        id="export-quality"
-                        min="1"
-                        max="20"
-                        step="1"
-                        value="10"
+                        id="speed-slider"
+                        min="0.5"
+                        max="2"
+                        step="0.1"
+                        value="1"
                     >
 
-                    <span id="export-quality-value">10</span>
+                    <span id="speed-value">1.0x</span>
 
-                    <span style="font-size:12px;">
-                        (1 = alta qualità, 20 = più leggero)
-                    </span>
+                    <span id="speed-delay-preview"></span>
 
-                </label>
+                </div>
+
+                <div class="export-options">
+
+                    <label for="pingpong-toggle">
+
+                        <input
+                            type="checkbox"
+                            id="pingpong-toggle"
+                        >
+
+                        Ping-pong effect (back and forth)
+
+                    </label>
+
+                    <label for="export-quality">
+
+                        Quality/size:
+
+                        <input
+                            type="range"
+                            id="export-quality"
+                            min="1"
+                            max="20"
+                            step="1"
+                            value="10"
+                        >
+
+                        <span id="export-quality-value">10</span>
+
+                        <span style="font-size:12px;">
+                            (1 = high quality, 20 = lighter)
+                        </span>
+
+                    </label>
+
+                </div>
+
+                <div class="export-area">
+
+                    <button
+                        id="export-gif"
+                        class="success"
+                        type="button"
+                    >
+                        Create new GIF
+                    </button>
+
+                    <span id="export-status"></span>
+
+                </div>
+
+                <div id="export-summary"></div>
+
+                <div class="error-box" id="export-error-box">
+                    <div class="error-title">
+                        Could not create the GIF
+                    </div>
+                    <div id="export-error-message"></div>
+                    <details>
+                        <summary>Technical details</summary>
+                        <pre id="export-error-technical"></pre>
+                    </details>
+                </div>
+
+                <img
+                    id="export-preview"
+                    alt="Exported GIF preview"
+                >
 
             </div>
 
-
-            <div class="export-area">
+            <div class="tab-nav">
 
                 <button
-                    id="export-gif"
-                    class="success"
                     type="button"
+                    data-prev="crop"
                 >
-                    Crea nuova GIF
+                    ← Back
                 </button>
 
-                <span id="export-status"></span>
+                <button
+                    class="hidden"
+                    type="button"
+                >
+                    Next →
+                </button>
 
             </div>
-
-            <div id="export-summary"></div>
-
-
-            <img
-                id="export-preview"
-                alt="Anteprima GIF esportata"
-            >
 
         </section>
 
@@ -1522,11 +1965,7 @@
 
 
     <!-- =====================================================
-         LIBRERIE LOCALI
-         
-         IMPORTANTISSIMO:
-         i file devono essere nella stessa cartella
-         dell'estensione.
+         LOCAL LIBRARIES
     ====================================================== -->
 
     <script src="gifuct-js.min.js"></script>
@@ -1534,7 +1973,7 @@
     <script src="gifshot.min.js"></script>
 
     <!-- =====================================================
-         APPLICAZIONE
+         APPLICATION
     ====================================================== -->
 
     <script src="app.js"></script>

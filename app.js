@@ -1,6 +1,6 @@
 /* ============================================================
    GIF FRAME MASTER
-   app.js - versione completa
+   app.js - versione completa (parte 1/3)
    ============================================================ */
 
 
@@ -36,13 +36,72 @@ let undoStack = [];
 const UNDO_LIMIT = 20;
 
 
+/* Modalità della label file: "load" | "import" */
+let fileButtonMode = "load";
+
+
+/* Tab attualmente attiva */
+let currentTab = "load";
+
+
+/* Stato drag & drop riordino frame */
+let dragSourceIndices = [];
+let dragTargetIndex = null;
+
+
+/* Ultimo frame cliccato (per selezione con SHIFT) */
+let lastSelectedFrameIndex = null;
+
+
+/* Stato anteprima animata */
+let animTimerId = null;
+let animCurrentIndex = -1;
+let animPlaying = false;
+
+
 /* ============================================================
    FUNZIONE DI SUPPORTO DOM
-   Evita errori se un elemento non esiste nell'HTML.
    ============================================================ */
 
 function $(id) {
     return document.getElementById(id);
+}
+
+
+/* ============================================================
+   GESTIONE ERRORI - BOX IN UI
+   ============================================================ */
+
+function showErrorBox(boxId, messageId, techId, message, error) {
+
+    const box = $(boxId);
+    const msgEl = $(messageId);
+    const techEl = $(techId);
+
+    if (!box || !msgEl) {
+        /* Fallback: almeno l'alert */
+        alert(message + (error ? "\n\n" + error.message : ""));
+        return;
+    }
+
+    msgEl.textContent = message;
+
+    if (techEl) {
+        techEl.textContent = error
+            ? (error.stack || error.message || String(error))
+            : "";
+    }
+
+    box.classList.add("visible");
+}
+
+function hideErrorBox(boxId) {
+
+    const box = $(boxId);
+
+    if (box) {
+        box.classList.remove("visible");
+    }
 }
 
 
@@ -79,49 +138,26 @@ const exportSummary = $("export-summary");
    ============================================================ */
 
 if (!fileInput) {
-
-    console.error(
-        "GIF Frame Master: elemento #gif-file non trovato."
-    );
+    console.error("GIF Frame Master: #gif-file not found.");
 }
 
 if (!framesGrid) {
-
-    console.error(
-        "GIF Frame Master: elemento #frames-grid non trovato."
-    );
+    console.error("GIF Frame Master: #frames-grid not found.");
 }
 
 
 /* ============================================================
-   GESTIONE UNDO (ANNULLA ULTIMA AZIONE)
-   ============================================================
-
-   Salviamo uno "snapshot" leggero prima di ogni azione che
-   modifica la selezione o l'elenco dei fotogrammi.
-
-   Uno snapshot contiene:
-     - la lista dei fotogrammi (composedFrames)
-     - l'insieme dei fotogrammi selezionati (selectedFrames)
-
-   Non copriamo crop e velocità: hanno già un proprio
-   pulsante di ripristino dedicato.
+   GESTIONE UNDO
    ============================================================ */
 
 function pushUndoSnapshot() {
 
     undoStack.push({
-
-        composedFrames:
-            composedFrames.slice(),
-
-        selectedFrames:
-            new Set(selectedFrames)
+        composedFrames: composedFrames.slice(),
+        selectedFrames: new Set(selectedFrames)
     });
 
-
     if (undoStack.length > UNDO_LIMIT) {
-
         undoStack.shift();
     }
 }
@@ -129,85 +165,341 @@ function pushUndoSnapshot() {
 function undoLastAction() {
 
     if (undoStack.length === 0) {
-
         return;
     }
 
+    const snapshot = undoStack.pop();
 
-    const snapshot =
-        undoStack.pop();
-
-
-    composedFrames =
-        snapshot.composedFrames;
-
-    selectedFrames =
-        snapshot.selectedFrames;
-
+    composedFrames = snapshot.composedFrames;
+    selectedFrames = snapshot.selectedFrames;
     lastSelectedFrameIndex = null;
 
-
     renderFramesGrid();
-
     updateFrameCount();
-
     updateCropPreview();
-
     updateSpeedPreview();
+    updateAnimPreview();
 }
 
 const undoButton = $("undo-action");
 
 if (undoButton) {
+    undoButton.addEventListener("click", function () {
+        undoLastAction();
+    });
+}
 
-    undoButton.addEventListener(
-        "click",
-        function () {
 
-            undoLastAction();
+/* ============================================================
+   GESTIONE TAB
+   ============================================================ */
+
+function switchTab(name) {
+
+    currentTab = name;
+
+    /* Aggiorna pulsanti tab */
+    const tabButtons = document.querySelectorAll(".tab-button");
+
+    tabButtons.forEach(function (btn) {
+        if (btn.dataset.tab === name) {
+            btn.classList.add("active");
         }
+        else {
+            btn.classList.remove("active");
+        }
+    });
+
+    /* Aggiorna pannelli */
+    const tabPanels = document.querySelectorAll(".tab-panel");
+
+    tabPanels.forEach(function (panel) {
+        if (panel.dataset.panel === name) {
+            panel.classList.add("active");
+        }
+        else {
+            panel.classList.remove("active");
+        }
+    });
+
+    /* Aggiorna stato pulsanti */
+    updateTabStates();
+
+    /* Scroll in cima */
+    window.scrollTo({ top: 0, behavior: "smooth" });
+
+    /* Refresh specifici per tab */
+    if (name === "crop") {
+        resizeCropCanvasDisplay();
+        updateCropSelectionDisplay();
+    }
+
+    if (name === "import") {
+        resizeImportWindowDisplay();
+        updateImportTransformDisplay();
+    }
+
+    /* Ferma l'anteprima animata se non siamo nella tab frames */
+    if (name !== "frames" && animPlaying) {
+        stopAnimPreview();
+    }
+}
+
+function updateTabStates() {
+
+    const hasFrames = composedFrames.length > 0;
+    const hasImportInProgress = importFrames.length > 0;
+
+    const tabButtons = document.querySelectorAll(".tab-button");
+
+    tabButtons.forEach(function (btn) {
+
+        const tab = btn.dataset.tab;
+
+        /* Tab 1 sempre attiva */
+        if (tab === "load") {
+            btn.disabled = false;
+            return;
+        }
+
+        /* Tab 2, 4, 5: richiedono almeno 1 frame */
+        if (tab === "frames" || tab === "crop" || tab === "export") {
+            btn.disabled = !hasFrames;
+            return;
+        }
+
+        /* Tab 3 (Queue): richiede un import in corso */
+        if (tab === "import") {
+            btn.disabled = !hasImportInProgress;
+            return;
+        }
+    });
+
+    /* Pallino crop (attivo se crop non è full-frame) */
+    const cropDot = document.getElementById("tab-dot-crop");
+
+    if (cropDot) {
+
+        const isFullFrame =
+            cropRect.x === 0 &&
+            cropRect.y === 0 &&
+            cropRect.width === gifWidth &&
+            cropRect.height === gifHeight;
+
+        cropDot.style.display =
+            (hasFrames && !isFullFrame)
+                ? "inline-block"
+                : "none";
+    }
+
+    /* Abilita/disabilita "Next" della tab 1 */
+    const tab1Next = document.getElementById("tab1-next");
+
+    if (tab1Next) {
+        tab1Next.disabled = !hasFrames;
+    }
+
+    /* Redirect: se sono sulla tab Queue e non c'è import */
+    if (currentTab === "import" && !hasImportInProgress) {
+        switchTab(hasFrames ? "frames" : "load");
+    }
+
+    /* Redirect: se sono su tab non più valida */
+    if (
+        (currentTab === "frames" ||
+         currentTab === "crop" ||
+         currentTab === "export") &&
+        !hasFrames
+    ) {
+        switchTab("load");
+    }
+
+    updateTabCounters();
+}
+
+function updateTabCounters() {
+
+    /* Contatore fotogrammi attivi */
+    const counterFrames =
+        document.getElementById("tab-counter-frames");
+
+    if (counterFrames) {
+
+        const total = composedFrames.length;
+        const removed = selectedFrames.size;
+        const active = total - removed;
+
+        if (total > 0) {
+            counterFrames.textContent = String(active);
+            counterFrames.style.display = "inline-block";
+        }
+        else {
+            counterFrames.textContent = "";
+            counterFrames.style.display = "none";
+        }
+    }
+
+    /* Contatore crop */
+    const counterCrop =
+        document.getElementById("tab-counter-crop");
+
+    if (counterCrop) {
+
+        const isFullFrame =
+            cropRect.x === 0 &&
+            cropRect.y === 0 &&
+            cropRect.width === gifWidth &&
+            cropRect.height === gifHeight;
+
+        if (gifWidth > 0 && gifHeight > 0 && !isFullFrame) {
+
+            counterCrop.textContent =
+                `${Math.round(cropRect.width)}×${Math.round(cropRect.height)}`;
+
+            counterCrop.style.display = "inline-block";
+        }
+        else {
+            counterCrop.textContent = "";
+            counterCrop.style.display = "none";
+        }
+    }
+}
+
+
+/* ============================================================
+   LISTENER DEI TAB
+   ============================================================ */
+
+const tabBar = document.getElementById("tab-bar");
+
+if (tabBar) {
+
+    tabBar.addEventListener("click", function (event) {
+
+        const btn = event.target.closest(".tab-button");
+
+        if (!btn) {
+            return;
+        }
+
+        if (btn.disabled) {
+            return;
+        }
+
+        switchTab(btn.dataset.tab);
+    });
+}
+
+
+/* ============================================================
+   LISTENER NEXT / BACK
+   ============================================================ */
+
+document.addEventListener("click", function (event) {
+
+    const btn = event.target.closest(
+        "button[data-next], button[data-prev]"
     );
+
+    if (!btn) {
+        return;
+    }
+
+    if (btn.disabled) {
+        return;
+    }
+
+    const target = btn.dataset.next || btn.dataset.prev;
+
+    if (target) {
+        switchTab(target);
+    }
+});
+
+
+/* ============================================================
+   AGGIORNA STATO PULSANTE FILE
+   ============================================================ */
+
+function updateFileButtonState() {
+
+    const label = $("gif-file-label");
+    const description = $("file-description");
+    const cardTitle = $("file-card-title");
+
+    if (!label || !description) {
+        return;
+    }
+
+    /* Testo del tab 1 */
+    const tab1Button =
+        document.querySelector('.tab-button[data-tab="load"]');
+
+    if (composedFrames.length === 0) {
+
+        fileButtonMode = "load";
+
+        label.textContent = "Select GIF";
+
+        description.textContent =
+            "Select an animated GIF to edit";
+
+        if (cardTitle) {
+            cardTitle.textContent = "1. Load a GIF";
+        }
+
+        if (tab1Button) {
+            tab1Button.textContent = "1. Load";
+        }
+    }
+    else {
+
+        fileButtonMode = "import";
+
+        label.textContent = "➕ Add GIF to queue";
+
+        description.textContent =
+            "Append another GIF to the existing sequence";
+
+        if (cardTitle) {
+            cardTitle.textContent = "1. Add a GIF to the queue";
+        }
+
+        if (tab1Button) {
+            tab1Button.textContent = "1. Add";
+        }
+    }
+
+    if (typeof updateTabStates === "function") {
+        updateTabStates();
+    }
 }
 
 
 /* ============================================================
    ANTEPRIMA A GRANDEZZA REALE DI UN FOTOGRAMMA
-   ============================================================
-
-   Doppio clic su una miniatura apre il fotogramma completo
-   (dimensioni reali della GIF, non della miniatura) in una
-   nuova finestra/scheda del browser.
    ============================================================ */
 
 function openFramePreview(frameCanvas, index) {
 
-    const dataUrl =
-        frameCanvas.toDataURL("image/png");
+    const dataUrl = frameCanvas.toDataURL("image/png");
 
-
-    const previewWindow =
-        window.open("", "_blank");
-
+    const previewWindow = window.open("", "_blank");
 
     if (!previewWindow) {
 
         alert(
-            "Il browser ha bloccato l'apertura della " +
-            "nuova finestra.\n\n" +
-            "Consenti i popup per questa pagina e riprova."
+            "The browser blocked the new window.\n\n" +
+            "Allow popups for this page and try again."
         );
 
         return;
     }
 
-
     previewWindow.document.title =
         `Frame #${index + 1} - ${frameCanvas.width}×${frameCanvas.height}`;
 
-
-    const body =
-        previewWindow.document.body;
-
+    const body = previewWindow.document.body;
 
     body.style.margin = "0";
     body.style.background = "#111827";
@@ -216,19 +508,12 @@ function openFramePreview(frameCanvas, index) {
     body.style.justifyContent = "center";
     body.style.minHeight = "100vh";
 
-
-    const img =
-        previewWindow.document.createElement("img");
-
+    const img = previewWindow.document.createElement("img");
 
     img.src = dataUrl;
-
     img.width = frameCanvas.width;
-
     img.height = frameCanvas.height;
-
     img.style.imageRendering = "pixelated";
-
 
     body.appendChild(img);
 }
@@ -244,7 +529,6 @@ const thumbSizeValueLabel = $("thumb-size-value");
 function updateThumbSizeLabel() {
 
     if (thumbSizeValueLabel && thumbSizeSlider) {
-
         thumbSizeValueLabel.textContent =
             thumbSizeSlider.value + "px";
     }
@@ -252,20 +536,47 @@ function updateThumbSizeLabel() {
 
 if (thumbSizeSlider) {
 
-    thumbSizeSlider.addEventListener(
-        "input",
-        function () {
+    thumbSizeSlider.addEventListener("input", function () {
 
-            document.documentElement.style.setProperty(
-                "--thumb-size",
-                thumbSizeSlider.value + "px"
-            );
+        document.documentElement.style.setProperty(
+            "--thumb-size",
+            thumbSizeSlider.value + "px"
+        );
 
-            updateThumbSizeLabel();
-        }
-    );
+        updateThumbSizeLabel();
+    });
 
     updateThumbSizeLabel();
+}
+
+
+/* ============================================================
+   VALORE NUMERICO SOGLIA DUPLICATI
+   ============================================================ */
+
+const duplicateThresholdInput = $("duplicate-threshold");
+const duplicateThresholdValue = $("duplicate-threshold-value");
+
+function updateDuplicateThresholdLabel() {
+
+    if (!duplicateThresholdInput || !duplicateThresholdValue) {
+        return;
+    }
+
+    const val = parseFloat(duplicateThresholdInput.value);
+
+    duplicateThresholdValue.textContent =
+        val.toFixed(1) + "%";
+}
+
+if (duplicateThresholdInput) {
+
+    duplicateThresholdInput.addEventListener(
+        "input",
+        updateDuplicateThresholdLabel
+    );
+
+    updateDuplicateThresholdLabel();
 }
 
 
@@ -275,55 +586,25 @@ if (thumbSizeSlider) {
 
 function getGifuct() {
 
-    /*
-       Versione normalmente utilizzata:
-       window.gifuct
-    */
-
     if (
         window.gifuct &&
         typeof window.gifuct.parseGIF === "function" &&
         typeof window.gifuct.decompressFrames === "function"
     ) {
-
-        return {
-            type: "modern",
-            library: window.gifuct
-        };
+        return { type: "modern", library: window.gifuct };
     }
-
-
-    /*
-       Alcune build espongono gifuctjs.
-    */
 
     if (
         window.gifuctjs &&
         typeof window.gifuctjs.parseGIF === "function" &&
         typeof window.gifuctjs.decompressFrames === "function"
     ) {
-
-        return {
-            type: "modern",
-            library: window.gifuctjs
-        };
+        return { type: "modern", library: window.gifuctjs };
     }
 
-
-    /*
-       Compatibilità con eventuali build che espongono GIF.
-    */
-
-    if (
-        typeof window.GIF === "function"
-    ) {
-
-        return {
-            type: "legacy",
-            library: window.GIF
-        };
+    if (typeof window.GIF === "function") {
+        return { type: "legacy", library: window.GIF };
     }
-
 
     return null;
 }
@@ -339,7 +620,6 @@ function getGifshot() {
         window.gifshot &&
         typeof window.gifshot.createGIF === "function"
     ) {
-
         return window.gifshot;
     }
 
@@ -353,169 +633,152 @@ function getGifshot() {
 
 if (fileInput) {
 
-    fileInput.addEventListener(
-        "change",
-        async function (event) {
+    fileInput.addEventListener("change", async function (event) {
 
-            const file =
-                event.target.files[0];
+        const file = event.target.files[0];
 
-            if (!file) {
-                return;
-            }
+        if (!file) {
+            return;
+        }
 
+        /* Nascondi errori precedenti */
+        hideErrorBox("load-error-box");
+        hideErrorBox("import-error-box");
 
-            /* Controllo estensione */
+        if (
+            file.type !== "image/gif" &&
+            !file.name.toLowerCase().endsWith(".gif")
+        ) {
 
-            if (
-                file.type !== "image/gif" &&
-                !file.name
-                    .toLowerCase()
-                    .endsWith(".gif")
-            ) {
+            alert("The selected file is not a GIF.");
 
-                alert(
-                    "Il file selezionato non è una GIF."
-                );
+            fileInput.value = "";
 
-                fileInput.value = "";
-
-                return;
-            }
+            return;
+        }
 
 
-            /* Stato caricamento */
+        /* ----------------------------------------------------
+           MODALITÀ IMPORT: accoda all'esistente
+           ---------------------------------------------------- */
 
-            if (loading) {
-                loading.style.display = "inline";
-            }
-
-
-            if (workspace) {
-                workspace.style.display = "none";
-            }
-
-            if (cropWorkspace) {
-                cropWorkspace.style.display = "none";
-            }
-
-            if (exportWorkspace) {
-                exportWorkspace.style.display = "none";
-            }
-
-            if (importWorkspace) {
-                importWorkspace.style.display = "none";
-            }
-
-
-            if (exportPreview) {
-                exportPreview.style.display = "none";
-            }
-
-
-            /*
-               Nuovo file: azzeriamo selezione, undo,
-               velocità, stato di esportazione precedente
-               e un eventuale import di una seconda GIF
-               rimasto a metà.
-            */
-
-            selectedFrames.clear();
-
-            undoStack = [];
-
-            importFrames = [];
-
-            importGifWidth = 0;
-
-            importGifHeight = 0;
-
-            importPreviewOverrideIndex = null;
-
-            importDragState = null;
-
-            speedMultiplier = 1;
-
-            const speedSliderReset =
-                $("speed-slider");
-
-            if (speedSliderReset) {
-
-                speedSliderReset.value = "1";
-            }
-
-            if (exportStatus) {
-
-                exportStatus.textContent = "";
-            }
-
-            if (exportSummary) {
-
-                exportSummary.textContent = "";
-            }
-
-            const oldDownloadButton =
-                $("download-gif");
-
-            if (oldDownloadButton) {
-
-                oldDownloadButton.remove();
-            }
-
+        if (
+            fileButtonMode === "import" &&
+            composedFrames.length > 0
+        ) {
 
             try {
 
-                console.log(
-                    "GIF Frame Master: caricamento:",
-                    file.name
-                );
+                const buffer = await file.arrayBuffer();
 
-
-                const buffer =
-                    await file.arrayBuffer();
-
-
-                await loadGif(buffer);
-
-
-                console.log(
-                    "GIF caricata correttamente."
-                );
-
+                await loadImportGif(buffer);
             }
             catch (error) {
 
-                console.error(
-                    "ERRORE GIF:",
+                console.error("IMPORT GIF ERROR:", error);
+
+                showErrorBox(
+                    "import-error-box",
+                    "import-error-message",
+                    "import-error-technical",
+                    "Could not read the GIF to append.",
                     error
                 );
 
+                /* Attiva la tab Queue per mostrare l'errore */
+                updateTabStates();
 
-                alert(
-                    "Impossibile leggere la GIF.\n\n" +
-                    "Errore: " +
-                    error.message
-                );
+                if (importFrames.length > 0) {
+                    switchTab("import");
+                }
+                else {
+                    switchTab("load");
+                }
             }
             finally {
 
-                if (loading) {
-                    loading.style.display = "none";
-                }
-
-
-                /*
-                   Svuota la selezione del file.
-
-                   In questo modo è possibile selezionare
-                   nuovamente anche lo stesso identico file
-                   per ripartire da zero.
-                */
-
                 fileInput.value = "";
             }
+
+            return;
         }
-    );
+
+
+        /* ----------------------------------------------------
+           MODALITÀ LOAD: carica GIF principale
+           ---------------------------------------------------- */
+
+        if (loading) {
+            loading.style.display = "inline";
+        }
+
+        if (exportPreview) {
+            exportPreview.style.display = "none";
+        }
+
+
+        /* Reset stato */
+
+        selectedFrames.clear();
+
+        undoStack = [];
+
+        importFrames = [];
+        importGifWidth = 0;
+        importGifHeight = 0;
+        importPreviewOverrideIndex = null;
+        importDragState = null;
+
+        speedMultiplier = 1;
+
+        const speedSliderReset = $("speed-slider");
+
+        if (speedSliderReset) {
+            speedSliderReset.value = "1";
+        }
+
+        if (exportStatus) exportStatus.textContent = "";
+        if (exportSummary) exportSummary.textContent = "";
+
+        const oldDownloadButton = $("download-gif");
+
+        if (oldDownloadButton) {
+            oldDownloadButton.remove();
+        }
+
+
+        try {
+
+            console.log(
+                "GIF Frame Master: loading:",
+                file.name
+            );
+
+            const buffer = await file.arrayBuffer();
+
+            await loadGif(buffer);
+
+            console.log("GIF loaded successfully.");
+        }
+        catch (error) {
+
+            console.error("GIF ERROR:", error);
+
+            showErrorBox(
+                "load-error-box",
+                "load-error-message",
+                "load-error-technical",
+                "Could not load the GIF. Check that the file is a valid animated GIF.",
+                error
+            );
+        }
+        finally {
+
+            if (loading) loading.style.display = "none";
+
+            fileInput.value = "";
+        }
+    });
 }
 
 
@@ -525,226 +788,93 @@ if (fileInput) {
 
 async function loadGif(buffer) {
 
-    const gifuct =
-        getGifuct();
-
-
-    /*
-       Se non troviamo gifuct-js,
-       fermiamo l'elaborazione.
-    */
+    const gifuct = getGifuct();
 
     if (!gifuct) {
 
         throw new Error(
-            "gifuct-js non è stato trovato.\n\n" +
-            "Controlla che il file gifuct-js.min.js " +
-            "sia presente nella cartella dell'estensione."
+            "gifuct-js was not found. Make sure gifuct-js.min.js " +
+            "is in the extension folder."
         );
     }
 
-
-    console.log(
-        "gifuct-js trovato:",
-        gifuct.type
-    );
-
+    console.log("gifuct-js found:", gifuct.type);
 
     let gif = null;
     let frames = null;
 
 
-    /* ========================================================
-       API MODERNA
-       ======================================================== */
+    if (gifuct.type === "modern") {
 
-    if (
-        gifuct.type === "modern"
-    ) {
+        console.log("Using gifuct-js modern API.");
 
-        console.log(
-            "Utilizzo API moderna gifuct-js."
-        );
+        gif = gifuct.library.parseGIF(buffer);
 
+        frames = gifuct.library.decompressFrames(gif, true);
+    }
+    else if (gifuct.type === "legacy") {
 
-        gif =
-            gifuct.library.parseGIF(
-                buffer
-            );
+        console.log("Using gifuct-js legacy API.");
 
+        const decoder = new gifuct.library(buffer);
 
-        frames =
-            gifuct.library.decompressFrames(
-                gif,
-                true
-            );
+        frames = decoder.decompressFrames(true);
     }
 
 
-    /* ========================================================
-       API LEGACY
-       ======================================================== */
+    if (!frames || !Array.isArray(frames) || frames.length === 0) {
+        throw new Error("No frames found in the GIF.");
+    }
 
-    else if (
-        gifuct.type === "legacy"
-    ) {
-
-        console.log(
-            "Utilizzo API legacy gifuct-js."
-        );
+    console.log("Frames found:", frames.length);
 
 
-        const decoder =
-            new gifuct.library(
-                buffer
-            );
+    if (gif && gif.lsd && gif.lsd.width && gif.lsd.height) {
+        gifWidth = gif.lsd.width;
+        gifHeight = gif.lsd.height;
+    }
+    else if (frames[0].dims) {
+        gifWidth = frames[0].dims.width;
+        gifHeight = frames[0].dims.height;
+    }
 
-
-        frames =
-            decoder.decompressFrames(
-                true
-            );
+    if (!gifWidth || !gifHeight) {
+        throw new Error("Could not determine GIF dimensions.");
     }
 
 
-    /* ========================================================
-       CONTROLLO RISULTATO
-       ======================================================== */
-
-    if (
-        !frames ||
-        !Array.isArray(frames) ||
-        frames.length === 0
-    ) {
-
-        throw new Error(
-            "Nessun fotogramma trovato nella GIF."
-        );
-    }
-
-
-    console.log(
-        "Fotogrammi trovati:",
-        frames.length
-    );
-
-
-    /* ========================================================
-       DIMENSIONI GIF
-       ======================================================== */
-
-    if (
-        gif &&
-        gif.lsd &&
-        gif.lsd.width &&
-        gif.lsd.height
-    ) {
-
-        gifWidth =
-            gif.lsd.width;
-
-        gifHeight =
-            gif.lsd.height;
-    }
-
-    else if (
-        frames[0].dims
-    ) {
-
-        /*
-           Fallback.
-        */
-
-        gifWidth =
-            frames[0].dims.width;
-
-        gifHeight =
-            frames[0].dims.height;
-    }
-
-
-    if (
-        !gifWidth ||
-        !gifHeight
-    ) {
-
-        throw new Error(
-            "Impossibile determinare le dimensioni della GIF."
-        );
-    }
-
-
-    /* ========================================================
-       SALVATAGGIO FRAME ORIGINALI
-       ======================================================== */
-
-    originalFrames =
-        frames;
-
+    originalFrames = frames;
 
     selectedFrames.clear();
 
 
-    /* ========================================================
-       RICOSTRUZIONE FRAME COMPLETI
-       ======================================================== */
+    composedFrames = composeAllFrames(
+        frames,
+        gifWidth,
+        gifHeight
+    );
 
-    composedFrames =
-        composeAllFrames(
-            frames,
-            gifWidth,
-            gifHeight
-        );
-
-
-    if (
-        !composedFrames.length
-    ) {
-
-        throw new Error(
-            "Impossibile ricostruire i fotogrammi."
-        );
+    if (!composedFrames.length) {
+        throw new Error("Could not rebuild frames.");
     }
 
 
-    /* ========================================================
-       AGGIORNAMENTO INTERFACCIA
-       ======================================================== */
-
     if (gifDimensions) {
-
         gifDimensions.textContent =
             `${gifWidth} × ${gifHeight} px`;
     }
 
-
     renderFramesGrid();
-
-
-    if (workspace) {
-        workspace.style.display = "block";
-    }
-
-    if (cropWorkspace) {
-        cropWorkspace.style.display = "block";
-    }
-
-    if (exportWorkspace) {
-        exportWorkspace.style.display = "block";
-    }
-
 
     cropPreviewOverrideIndex = null;
 
-    const cropPreviewFrameReset =
-        $("crop-preview-frame");
+    const cropPreviewFrameReset = $("crop-preview-frame");
 
     if (cropPreviewFrameReset) {
 
         cropPreviewFrameReset.value = "1";
 
-        cropPreviewFrameReset.max =
-            composedFrames.length;
+        cropPreviewFrameReset.max = composedFrames.length;
     }
 
     resetCrop();
@@ -754,6 +884,16 @@ async function loadGif(buffer) {
     updateFrameCount();
 
     updateSpeedPreview();
+
+    updateAnimPreview();
+
+    updateFileButtonState();
+
+    /* Aggiorna stato tab e passa a "Frames" */
+
+    updateTabStates();
+
+    switchTab("frames");
 }
 
 
@@ -761,80 +901,35 @@ async function loadGif(buffer) {
    RICOSTRUZIONE COMPLETA DEI FRAME
    ============================================================ */
 
-function composeAllFrames(
-    frames,
-    width,
-    height
-) {
+function composeAllFrames(frames, width, height) {
 
     const result = [];
 
+    const canvas = document.createElement("canvas");
 
-    const canvas =
-        document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
 
-
-    canvas.width =
-        width;
-
-    canvas.height =
-        height;
-
-
-    const ctx =
-        canvas.getContext(
-            "2d",
-            {
-                willReadFrequently: true
-            }
-        );
-
-
-    /*
-       Canvas inizialmente trasparente.
-    */
-
-    ctx.clearRect(
-        0,
-        0,
-        width,
-        height
+    const ctx = canvas.getContext(
+        "2d",
+        { willReadFrequently: true }
     );
 
+    ctx.clearRect(0, 0, width, height);
 
     let previousFrame = null;
-
     let previousCanvasData = null;
 
+    for (let i = 0; i < frames.length; i++) {
 
-    for (
-        let i = 0;
-        i < frames.length;
-        i++
-    ) {
+        const frame = frames[i];
 
-        const frame =
-            frames[i];
-
-
-        /* ====================================================
-           DISPOSAL FRAME PRECEDENTE
-           ==================================================== */
-
+        /* Disposal frame precedente */
         if (previousFrame) {
 
-            /*
-               Disposal 2:
-               cancella la zona del frame precedente.
-            */
+            if (previousFrame.disposalType === 2) {
 
-            if (
-                previousFrame.disposalType === 2
-            ) {
-
-                const d =
-                    previousFrame.dims;
-
+                const d = previousFrame.dims;
 
                 ctx.clearRect(
                     d.left,
@@ -843,66 +938,32 @@ function composeAllFrames(
                     d.height
                 );
             }
-
-
-            /*
-               Disposal 3:
-               ripristina lo stato precedente.
-            */
-
             else if (
                 previousFrame.disposalType === 3 &&
                 previousCanvasData
             ) {
 
-                ctx.putImageData(
-                    previousCanvasData,
-                    0,
-                    0
-                );
+                ctx.putImageData(previousCanvasData, 0, 0);
             }
         }
 
-
-        /* ====================================================
-           SALVATAGGIO STATO PRIMA DEL FRAME
-           ==================================================== */
-
-        if (
-            frame.disposalType === 3
-        ) {
-
+        /* Salvataggio stato prima del frame (disposal 3) */
+        if (frame.disposalType === 3) {
             previousCanvasData =
-                ctx.getImageData(
-                    0,
-                    0,
-                    width,
-                    height
-                );
+                ctx.getImageData(0, 0, width, height);
         }
-
         else {
-
             previousCanvasData = null;
         }
 
+        /* Disegno patch */
+        if (frame.patch && frame.dims) {
 
-        /* ====================================================
-           DISEGNO PATCH
-           ==================================================== */
-
-        if (
-            frame.patch &&
-            frame.dims
-        ) {
-
-            const imageData =
-                new ImageData(
-                    frame.patch,
-                    frame.dims.width,
-                    frame.dims.height
-                );
-
+            const imageData = new ImageData(
+                frame.patch,
+                frame.dims.width,
+                frame.dims.height
+            );
 
             ctx.putImageData(
                 imageData,
@@ -911,51 +972,24 @@ function composeAllFrames(
             );
         }
 
+        /* Copia completa */
+        const frameCanvas = document.createElement("canvas");
 
-        /* ====================================================
-           COPIA COMPLETA DEL FRAME
-           ==================================================== */
+        frameCanvas.width = width;
+        frameCanvas.height = height;
 
-        const frameCanvas =
-            document.createElement("canvas");
+        const frameCtx = frameCanvas.getContext("2d");
 
-
-        frameCanvas.width =
-            width;
-
-        frameCanvas.height =
-            height;
-
-
-        const frameCtx =
-            frameCanvas.getContext("2d");
-
-
-        frameCtx.drawImage(
-            canvas,
-            0,
-            0
-        );
-
+        frameCtx.drawImage(canvas, 0, 0);
 
         result.push({
-
             canvas: frameCanvas,
-
-            delay:
-                normalizeDelay(
-                    frame.delay
-                ),
-
-            disposalType:
-                frame.disposalType || 0
+            delay: normalizeDelay(frame.delay),
+            disposalType: frame.disposalType || 0
         });
 
-
-        previousFrame =
-            frame;
+        previousFrame = frame;
     }
-
 
     return result;
 }
@@ -967,28 +1001,18 @@ function composeAllFrames(
 
 function normalizeDelay(delay) {
 
-    let value =
-        Number(delay);
+    let value = Number(delay);
 
-
-    if (
-        !Number.isFinite(value) ||
-        value <= 0
-    ) {
-
+    if (!Number.isFinite(value) || value <= 0) {
         value = 100;
     }
 
-
-    return Math.max(
-        10,
-        Math.round(value)
-    );
+    return Math.max(10, Math.round(value));
 }
 
 
 /* ============================================================
-   RENDER GRIGLIA
+   RENDER GRIGLIA (con drag & drop per riordinare)
    ============================================================ */
 
 function renderFramesGrid() {
@@ -997,207 +1021,544 @@ function renderFramesGrid() {
         return;
     }
 
-
     framesGrid.innerHTML = "";
 
+    composedFrames.forEach(function (frameData, index) {
 
-    composedFrames.forEach(
-        function (frameData, index) {
+        const card = document.createElement("div");
 
-            const card =
-                document.createElement("div");
+        card.className = "frame-card";
+        card.dataset.index = index;
+        card.draggable = true;
+
+        if (selectedFrames.has(index)) {
+            card.classList.add("selected");
+        }
+
+        /* Badge */
+        const badge = document.createElement("div");
+        badge.className = "frame-badge";
+        badge.textContent = `#${index + 1}`;
+
+        /* Canvas */
+        const canvas = document.createElement("canvas");
+        canvas.width = gifWidth;
+        canvas.height = gifHeight;
+        canvas.getContext("2d").drawImage(frameData.canvas, 0, 0);
+
+        /* Info delay */
+        const info = document.createElement("div");
+        info.className = "frame-info";
+        info.textContent = `${frameData.delay} ms`;
+
+        card.appendChild(badge);
+        card.appendChild(canvas);
+        card.appendChild(info);
 
 
-            card.className =
-                "frame-card";
+        /* --------------------------------------------
+           Click: selezione (con shift per intervallo)
+           -------------------------------------------- */
 
+        card.addEventListener("click", function (event) {
 
-            if (
-                selectedFrames.has(index)
-            ) {
+            pushUndoSnapshot();
 
-                card.classList.add(
-                    "selected"
+            if (event.shiftKey && lastSelectedFrameIndex !== null) {
+
+                const start = Math.min(
+                    lastSelectedFrameIndex,
+                    index
                 );
+
+                const end = Math.max(
+                    lastSelectedFrameIndex,
+                    index
+                );
+
+                for (let i = start; i <= end; i++) {
+                    selectedFrames.add(i);
+                }
+            }
+            else {
+                toggleFrameSelection(index);
             }
 
+            lastSelectedFrameIndex = index;
 
-            /* ----------------------------------------------
-               Badge
-               ---------------------------------------------- */
-
-            const badge =
-                document.createElement("div");
-
-
-            badge.className =
-                "frame-badge";
+            renderFramesGrid();
+            updateFrameCount();
+            updateCropPreview();
+            updateSpeedPreview();
+            updateAnimPreview();
+        });
 
 
-            badge.textContent =
-                `#${index + 1}`;
+        /* --------------------------------------------
+           Doppio click: anteprima a grandezza reale
+           -------------------------------------------- */
+
+        card.addEventListener("dblclick", function (event) {
+
+            event.stopPropagation();
+
+            openFramePreview(frameData.canvas, index);
+        });
 
 
-            /* ----------------------------------------------
-               Canvas
-               ---------------------------------------------- */
+        /* --------------------------------------------
+           DRAG & DROP
+           -------------------------------------------- */
 
-            const canvas =
-                document.createElement("canvas");
+        card.addEventListener("dragstart", function (event) {
 
+            if (!selectedFrames.has(index)) {
 
-            canvas.width =
-                gifWidth;
+                selectedFrames.clear();
+                selectedFrames.add(index);
 
-            canvas.height =
-                gifHeight;
+                renderFramesGrid();
 
+                event.preventDefault();
 
-            const ctx =
-                canvas.getContext("2d");
+                return;
+            }
 
+            dragSourceIndices =
+                Array.from(selectedFrames).sort((a, b) => a - b);
 
-            ctx.drawImage(
-                frameData.canvas,
-                0,
-                0
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData(
+                "text/plain",
+                dragSourceIndices.join(",")
             );
 
+            card.classList.add("dragging");
+        });
 
-            /* ----------------------------------------------
-               Informazioni delay
-               ---------------------------------------------- */
+        card.addEventListener("dragend", function () {
 
-            const info =
-                document.createElement("div");
+            card.classList.remove("dragging");
 
+            clearDropIndicators();
 
-            info.className =
-                "frame-info";
+            dragSourceIndices = [];
+            dragTargetIndex = null;
+        });
 
+        card.addEventListener("dragover", function (event) {
 
-            info.textContent =
-                `${frameData.delay} ms`;
+            if (dragSourceIndices.length === 0) {
+                return;
+            }
 
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
 
-            card.appendChild(
-                badge
+            const rect = card.getBoundingClientRect();
+
+            const isTopHalf =
+                (event.clientY - rect.top) < rect.height / 2;
+
+            clearDropIndicators();
+
+            if (isTopHalf) {
+                card.classList.add("drop-before");
+                dragTargetIndex = index;
+            }
+            else {
+                card.classList.add("drop-after");
+                dragTargetIndex = index + 1;
+            }
+        });
+
+        card.addEventListener("dragleave", function () {
+
+            card.classList.remove("drop-before", "drop-after");
+        });
+
+        card.addEventListener("drop", function (event) {
+
+            event.preventDefault();
+
+            if (dragSourceIndices.length === 0) {
+                return;
+            }
+
+            moveFrames(
+                dragSourceIndices,
+                dragTargetIndex !== null
+                    ? dragTargetIndex
+                    : index
             );
 
-            card.appendChild(
-                canvas
-            );
+            clearDropIndicators();
 
-            card.appendChild(
-                info
-            );
+            dragSourceIndices = [];
+            dragTargetIndex = null;
+        });
 
-
-            /* ----------------------------------------------
-               Selezione (singolo clic)
-               ---------------------------------------------- */
-
-            card.addEventListener(
-                "click",
-                function (event) {
-
-                    pushUndoSnapshot();
-
-
-                    /*
-                       SHIFT + clic:
-                       seleziona l'intervallo compreso tra
-                       l'ultimo frame cliccato e quello attuale.
-                    */
-
-                    if (
-                        event.shiftKey &&
-                        lastSelectedFrameIndex !== null
-                    ) {
-
-                        const start =
-                            Math.min(
-                                lastSelectedFrameIndex,
-                                index
-                            );
-
-
-                        const end =
-                            Math.max(
-                                lastSelectedFrameIndex,
-                                index
-                            );
-
-
-                        for (
-                            let i = start;
-                            i <= end;
-                            i++
-                        ) {
-
-                            selectedFrames.add(i);
-                        }
-
-                    }
-
-                    else {
-
-                        toggleFrameSelection(
-                            index
-                        );
-                    }
-
-
-                    lastSelectedFrameIndex =
-                        index;
-
-
-                    renderFramesGrid();
-
-                    updateFrameCount();
-
-                    updateCropPreview();
-
-                    updateSpeedPreview();
-                }
-            );
-
-
-            /* ----------------------------------------------
-               Anteprima a grandezza reale (doppio clic)
-               ---------------------------------------------- */
-
-            card.addEventListener(
-                "dblclick",
-                function (event) {
-
-                    event.stopPropagation();
-
-                    openFramePreview(
-                        frameData.canvas,
-                        index
-                    );
-                }
-            );
-
-
-            framesGrid.appendChild(
-                card
-            );
-        }
-    );
-
+        framesGrid.appendChild(card);
+    });
 
     updateFrameCount();
 }
 
 
 /* ============================================================
-   ULTIMO FRAME CLICCATO
-   Utilizzato per la selezione SHIFT.
+   INIZIO PARTE 2/3
    ============================================================ */
 
-let lastSelectedFrameIndex = null;
+
+/* ============================================================
+   ANTEPRIMA ANIMATA (tab 2)
+   ============================================================
+   Riproduce ciclicamente i frame ATTIVI (non selezionati)
+   con i loro delay reali. Serve a vedere il risultato prima
+   di esportare, senza dover attendere gifshot.
+   ============================================================ */
+
+const previewAnimCanvas = $("preview-anim-canvas");
+const previewAnimToggle = $("preview-anim-toggle");
+const previewAnimFrameLabel = $("preview-anim-frame");
+const previewAnimDelayLabel = $("preview-anim-delay");
+
+
+/* Dimensioni massime del canvas di anteprima */
+const ANIM_PREVIEW_MAX_W = 320;
+const ANIM_PREVIEW_MAX_H = 240;
+
+
+/* Restituisce la lista degli indici dei frame attivi */
+function getActiveFrameIndices() {
+
+    const list = [];
+
+    for (let i = 0; i < composedFrames.length; i++) {
+
+        if (!selectedFrames.has(i)) {
+            list.push(i);
+        }
+    }
+
+    return list;
+}
+
+
+/* Ridimensiona il canvas di anteprima mantenendo le proporzioni */
+function resizeAnimPreviewCanvas() {
+
+    if (!previewAnimCanvas || !gifWidth || !gifHeight) {
+        return;
+    }
+
+    const scale = Math.min(
+        1,
+        ANIM_PREVIEW_MAX_W / gifWidth,
+        ANIM_PREVIEW_MAX_H / gifHeight
+    );
+
+    const displayWidth = Math.max(
+        1,
+        Math.round(gifWidth * scale)
+    );
+
+    const displayHeight = Math.max(
+        1,
+        Math.round(gifHeight * scale)
+    );
+
+    previewAnimCanvas.width = gifWidth;
+    previewAnimCanvas.height = gifHeight;
+
+    previewAnimCanvas.style.width = `${displayWidth}px`;
+    previewAnimCanvas.style.height = `${displayHeight}px`;
+}
+
+
+/* Mostra un frame specifico sul canvas di anteprima */
+function drawAnimPreviewFrame(frameIndex) {
+
+    if (!previewAnimCanvas) {
+        return;
+    }
+
+    const ctx = previewAnimCanvas.getContext("2d");
+
+    ctx.clearRect(
+        0,
+        0,
+        previewAnimCanvas.width,
+        previewAnimCanvas.height
+    );
+
+    if (frameIndex < 0 || frameIndex >= composedFrames.length) {
+        return;
+    }
+
+    const frame = composedFrames[frameIndex];
+
+    if (!frame || !frame.canvas) {
+        return;
+    }
+
+    ctx.drawImage(frame.canvas, 0, 0);
+
+
+    /* Aggiorna etichette */
+
+    const activeIndices = getActiveFrameIndices();
+
+    const positionInActive =
+        activeIndices.indexOf(frameIndex) + 1;
+
+    if (previewAnimFrameLabel) {
+
+        if (positionInActive > 0) {
+            previewAnimFrameLabel.textContent =
+                `${positionInActive} / ${activeIndices.length}`;
+        }
+        else {
+            previewAnimFrameLabel.textContent =
+                `excluded (${frameIndex + 1})`;
+        }
+    }
+
+    if (previewAnimDelayLabel) {
+        previewAnimDelayLabel.textContent =
+            `${frame.delay} ms`;
+    }
+}
+
+
+/* Ferma l'anteprima animata */
+function stopAnimPreview() {
+
+    if (animTimerId !== null) {
+
+        clearTimeout(animTimerId);
+
+        animTimerId = null;
+    }
+
+    animPlaying = false;
+
+    if (previewAnimToggle) {
+        previewAnimToggle.textContent = "▶ Play";
+    }
+}
+
+
+/* Ciclo dell'anteprima: mostra il frame successivo e riprogramma */
+function scheduleNextAnimFrame() {
+
+    const activeIndices = getActiveFrameIndices();
+
+    if (activeIndices.length === 0) {
+
+        /* Nessun frame attivo: mostra il canvas vuoto */
+        if (previewAnimCanvas) {
+
+            const ctx = previewAnimCanvas.getContext("2d");
+
+            ctx.clearRect(
+                0,
+                0,
+                previewAnimCanvas.width,
+                previewAnimCanvas.height
+            );
+        }
+
+        if (previewAnimFrameLabel) {
+            previewAnimFrameLabel.textContent = "-";
+        }
+
+        if (previewAnimDelayLabel) {
+            previewAnimDelayLabel.textContent = "-";
+        }
+
+        stopAnimPreview();
+
+        return;
+    }
+
+    /* Trova la posizione corrente nella lista attiva */
+    let position = activeIndices.indexOf(animCurrentIndex);
+
+    if (position === -1) {
+        position = -1; /* -1 così il +1 porta a 0 */
+    }
+
+    position = (position + 1) % activeIndices.length;
+
+    const nextIndex = activeIndices[position];
+
+    animCurrentIndex = nextIndex;
+
+    drawAnimPreviewFrame(nextIndex);
+
+
+    /* Programma il prossimo frame in base al delay corrente */
+    const frame = composedFrames[nextIndex];
+
+    const delay = frame && frame.delay ? frame.delay : 100;
+
+    animTimerId = setTimeout(
+        scheduleNextAnimFrame,
+        delay
+    );
+}
+
+
+/* Avvia l'anteprima animata */
+function startAnimPreview() {
+
+    if (composedFrames.length === 0) {
+        return;
+    }
+
+    const activeIndices = getActiveFrameIndices();
+
+    if (activeIndices.length === 0) {
+
+        /* Nessun frame attivo: non c'è nulla da riprodurre */
+        return;
+    }
+
+    stopAnimPreview();
+
+    animPlaying = true;
+
+    if (previewAnimToggle) {
+        previewAnimToggle.textContent = "■ Stop";
+    }
+
+    /* Se l'indice corrente non è attivo, riparti dal primo */
+    if (activeIndices.indexOf(animCurrentIndex) === -1) {
+        animCurrentIndex = -1;
+    }
+
+    scheduleNextAnimFrame();
+}
+
+
+/* Aggiorna l'anteprima (dimensioni + frame visualizzato)
+   quando cambia qualcosa nella griglia */
+function updateAnimPreview() {
+
+    resizeAnimPreviewCanvas();
+
+    /* Se non stiamo suonando, mostra semplicemente il primo
+       frame attivo (o il canvas vuoto) */
+
+    if (!animPlaying) {
+
+        const activeIndices = getActiveFrameIndices();
+
+        if (activeIndices.length === 0) {
+
+            if (previewAnimCanvas) {
+
+                const ctx =
+                    previewAnimCanvas.getContext("2d");
+
+                ctx.clearRect(
+                    0,
+                    0,
+                    previewAnimCanvas.width,
+                    previewAnimCanvas.height
+                );
+            }
+
+            if (previewAnimFrameLabel) {
+                previewAnimFrameLabel.textContent = "-";
+            }
+
+            if (previewAnimDelayLabel) {
+                previewAnimDelayLabel.textContent = "-";
+            }
+
+            return;
+        }
+
+        const first = activeIndices[0];
+
+        animCurrentIndex = first;
+
+        drawAnimPreviewFrame(first);
+    }
+}
+
+
+/* Listener del pulsante Play/Stop */
+if (previewAnimToggle) {
+
+    previewAnimToggle.addEventListener("click", function () {
+
+        if (animPlaying) {
+            stopAnimPreview();
+        }
+        else {
+            startAnimPreview();
+        }
+    });
+}
+
+
+/* ============================================================
+   RIORDINO FRAME (drag & drop)
+   ============================================================ */
+
+function moveFrames(sourceIndices, targetIndex) {
+
+    if (!sourceIndices.length) {
+        return;
+    }
+
+    pushUndoSnapshot();
+
+    const sources = sourceIndices.slice().sort((a, b) => a - b);
+
+    const moving = sources.map(i => composedFrames[i]);
+
+    const sourcesBeforeTarget =
+        sources.filter(i => i < targetIndex).length;
+
+    for (let i = sources.length - 1; i >= 0; i--) {
+        composedFrames.splice(sources[i], 1);
+    }
+
+    const insertAt = targetIndex - sourcesBeforeTarget;
+
+    composedFrames.splice(insertAt, 0, ...moving);
+
+    selectedFrames.clear();
+
+    for (let i = 0; i < moving.length; i++) {
+        selectedFrames.add(insertAt + i);
+    }
+
+    lastSelectedFrameIndex = insertAt;
+
+    renderFramesGrid();
+    updateFrameCount();
+    updateCropPreview();
+    updateSpeedPreview();
+    updateAnimPreview();
+}
+
+function clearDropIndicators() {
+
+    if (!framesGrid) {
+        return;
+    }
+
+    framesGrid
+        .querySelectorAll(".drop-before, .drop-after")
+        .forEach(function (el) {
+            el.classList.remove("drop-before", "drop-after");
+        });
+}
 
 
 /* ============================================================
@@ -1206,20 +1567,11 @@ let lastSelectedFrameIndex = null;
 
 function toggleFrameSelection(index) {
 
-    if (
-        selectedFrames.has(index)
-    ) {
-
-        selectedFrames.delete(
-            index
-        );
+    if (selectedFrames.has(index)) {
+        selectedFrames.delete(index);
     }
-
     else {
-
-        selectedFrames.add(
-            index
-        );
+        selectedFrames.add(index);
     }
 }
 
@@ -1228,42 +1580,27 @@ function toggleFrameSelection(index) {
    SELEZIONA TUTTI
    ============================================================ */
 
-const selectAllButton =
-    $("select-all");
-
+const selectAllButton = $("select-all");
 
 if (selectAllButton) {
 
-    selectAllButton.addEventListener(
-        "click",
-        function () {
+    selectAllButton.addEventListener("click", function () {
 
-            pushUndoSnapshot();
+        pushUndoSnapshot();
 
-            selectedFrames.clear();
+        selectedFrames.clear();
 
-
-            for (
-                let i = 0;
-                i < composedFrames.length;
-                i++
-            ) {
-
-                selectedFrames.add(i);
-            }
-
-
-            lastSelectedFrameIndex =
-                null;
-
-
-            renderFramesGrid();
-
-            updateCropPreview();
-
-            updateSpeedPreview();
+        for (let i = 0; i < composedFrames.length; i++) {
+            selectedFrames.add(i);
         }
-    );
+
+        lastSelectedFrameIndex = null;
+
+        renderFramesGrid();
+        updateCropPreview();
+        updateSpeedPreview();
+        updateAnimPreview();
+    });
 }
 
 
@@ -1271,30 +1608,23 @@ if (selectAllButton) {
    DESELEZIONA TUTTI
    ============================================================ */
 
-const deselectAllButton =
-    $("deselect-all");
-
+const deselectAllButton = $("deselect-all");
 
 if (deselectAllButton) {
 
-    deselectAllButton.addEventListener(
-        "click",
-        function () {
+    deselectAllButton.addEventListener("click", function () {
 
-            pushUndoSnapshot();
+        pushUndoSnapshot();
 
-            selectedFrames.clear();
+        selectedFrames.clear();
 
-            lastSelectedFrameIndex =
-                null;
+        lastSelectedFrameIndex = null;
 
-            renderFramesGrid();
-
-            updateCropPreview();
-
-            updateSpeedPreview();
-        }
-    );
+        renderFramesGrid();
+        updateCropPreview();
+        updateSpeedPreview();
+        updateAnimPreview();
+    });
 }
 
 
@@ -1306,36 +1636,34 @@ const invertSelectionButton = $("invert-selection");
 
 if (invertSelectionButton) {
 
-    invertSelectionButton.addEventListener(
-        "click",
-        function () {
+    invertSelectionButton.addEventListener("click", function () {
 
-            pushUndoSnapshot();
+        pushUndoSnapshot();
 
-            const inverted = new Set();
+        const inverted = new Set();
 
-            for (let i = 0; i < composedFrames.length; i++) {
+        for (let i = 0; i < composedFrames.length; i++) {
 
-                if (!selectedFrames.has(i)) {
-                    inverted.add(i);
-                }
+            if (!selectedFrames.has(i)) {
+                inverted.add(i);
             }
-
-            selectedFrames = inverted;
-
-            lastSelectedFrameIndex = null;
-
-            renderFramesGrid();
-            updateFrameCount();
-            updateCropPreview();
-            updateSpeedPreview();
         }
-    );
+
+        selectedFrames = inverted;
+
+        lastSelectedFrameIndex = null;
+
+        renderFramesGrid();
+        updateFrameCount();
+        updateCropPreview();
+        updateSpeedPreview();
+        updateAnimPreview();
+    });
 }
 
 
 /* ============================================================
-   DECIMAZIONE: RIMUOVI 1 FRAME OGNI N (tra i restanti)
+   DECIMAZIONE: RIMUOVI 1 FRAME OGNI N
    ============================================================ */
 
 const decimateButton = $("decimate-frames");
@@ -1343,61 +1671,47 @@ const decimateInput = $("decimate-n");
 
 if (decimateButton) {
 
-    decimateButton.addEventListener(
-        "click",
-        function () {
+    decimateButton.addEventListener("click", function () {
 
-            let n = decimateInput
-                ? parseInt(decimateInput.value, 10)
-                : 2;
+        let n = decimateInput
+            ? parseInt(decimateInput.value, 10)
+            : 2;
 
-            if (!Number.isFinite(n) || n < 2) {
-                n = 2;
-            }
-
-            pushUndoSnapshot();
-
-            const activeIndices = [];
-
-            for (let i = 0; i < composedFrames.length; i++) {
-
-                if (!selectedFrames.has(i)) {
-                    activeIndices.push(i);
-                }
-            }
-
-            for (let i = 0; i < activeIndices.length; i++) {
-
-                if ((i + 1) % n === 0) {
-                    selectedFrames.add(activeIndices[i]);
-                }
-            }
-
-            lastSelectedFrameIndex = null;
-
-            renderFramesGrid();
-            updateFrameCount();
-            updateCropPreview();
-            updateSpeedPreview();
+        if (!Number.isFinite(n) || n < 2) {
+            n = 2;
         }
-    );
+
+        pushUndoSnapshot();
+
+        const activeIndices = [];
+
+        for (let i = 0; i < composedFrames.length; i++) {
+
+            if (!selectedFrames.has(i)) {
+                activeIndices.push(i);
+            }
+        }
+
+        for (let i = 0; i < activeIndices.length; i++) {
+
+            if ((i + 1) % n === 0) {
+                selectedFrames.add(activeIndices[i]);
+            }
+        }
+
+        lastSelectedFrameIndex = null;
+
+        renderFramesGrid();
+        updateFrameCount();
+        updateCropPreview();
+        updateSpeedPreview();
+        updateAnimPreview();
+    });
 }
 
 
 /* ============================================================
    RILEVAMENTO FRAME DUPLICATI / QUASI IDENTICI
-   ============================================================
-
-   Confrontiamo ogni fotogramma "attivo" con l'ultimo
-   fotogramma tenuto come riferimento, usando una miniatura
-   in scala di grigi.
-
-   Se la differenza media è sotto la soglia scelta, il
-   fotogramma viene considerato un duplicato e selezionato
-   (quindi escluso dall'export / rimovibile dalla vista),
-   ma il riferimento NON cambia: questo permette di
-   raggruppare intere sequenze quasi identiche, non solo
-   coppie consecutive.
    ============================================================ */
 
 const DEDUPE_THUMB_W = 32;
@@ -1405,17 +1719,15 @@ const DEDUPE_THUMB_H = 24;
 
 function getFrameThumbnailGray(frameCanvas) {
 
-    const thumb =
-        document.createElement("canvas");
+    const thumb = document.createElement("canvas");
 
     thumb.width = DEDUPE_THUMB_W;
     thumb.height = DEDUPE_THUMB_H;
 
-    const ctx =
-        thumb.getContext(
-            "2d",
-            { willReadFrequently: true }
-        );
+    const ctx = thumb.getContext(
+        "2d",
+        { willReadFrequently: true }
+    );
 
     ctx.drawImage(
         frameCanvas,
@@ -1425,24 +1737,18 @@ function getFrameThumbnailGray(frameCanvas) {
         DEDUPE_THUMB_H
     );
 
-    const data =
-        ctx.getImageData(
-            0,
-            0,
-            DEDUPE_THUMB_W,
-            DEDUPE_THUMB_H
-        ).data;
+    const data = ctx.getImageData(
+        0,
+        0,
+        DEDUPE_THUMB_W,
+        DEDUPE_THUMB_H
+    ).data;
 
-    const gray =
-        new Uint8ClampedArray(
-            DEDUPE_THUMB_W * DEDUPE_THUMB_H
-        );
+    const gray = new Uint8ClampedArray(
+        DEDUPE_THUMB_W * DEDUPE_THUMB_H
+    );
 
-    for (
-        let i = 0, p = 0;
-        i < data.length;
-        i += 4, p++
-    ) {
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
 
         gray[p] =
             data[i] * 0.299 +
@@ -1458,7 +1764,6 @@ function frameDiffPercentage(grayA, grayB) {
     let sum = 0;
 
     for (let i = 0; i < grayA.length; i++) {
-
         sum += Math.abs(grayA[i] - grayB[i]);
     }
 
@@ -1468,131 +1773,279 @@ function frameDiffPercentage(grayA, grayB) {
 }
 
 const detectDuplicatesButton = $("detect-duplicates");
-const duplicateThreshold = $("duplicate-threshold");
 
 if (detectDuplicatesButton) {
 
-    detectDuplicatesButton.addEventListener(
-        "click",
-        function () {
+    detectDuplicatesButton.addEventListener("click", function () {
 
-            if (composedFrames.length === 0) {
-                return;
+        if (composedFrames.length === 0) {
+            return;
+        }
+
+        let threshold = duplicateThresholdInput
+            ? parseFloat(duplicateThresholdInput.value)
+            : 1.5;
+
+        if (!Number.isFinite(threshold) || threshold < 0) {
+            threshold = 1.5;
+        }
+
+        pushUndoSnapshot();
+
+        let referenceGray = null;
+        let markedCount = 0;
+
+        for (let i = 0; i < composedFrames.length; i++) {
+
+            if (selectedFrames.has(i)) {
+                continue;
             }
 
-            let threshold = duplicateThreshold
-                ? parseFloat(duplicateThreshold.value)
-                : 3;
+            const gray = getFrameThumbnailGray(
+                composedFrames[i].canvas
+            );
 
-            if (!Number.isFinite(threshold) || threshold < 0) {
-                threshold = 3;
-            }
+            if (referenceGray) {
 
-            pushUndoSnapshot();
+                const diff = frameDiffPercentage(
+                    referenceGray,
+                    gray
+                );
 
-            let referenceGray = null;
-            let markedCount = 0;
+                if (diff <= threshold) {
 
-            for (let i = 0; i < composedFrames.length; i++) {
-
-                if (selectedFrames.has(i)) {
+                    selectedFrames.add(i);
+                    markedCount++;
                     continue;
                 }
-
-                const gray =
-                    getFrameThumbnailGray(
-                        composedFrames[i].canvas
-                    );
-
-                if (referenceGray) {
-
-                    const diff =
-                        frameDiffPercentage(
-                            referenceGray,
-                            gray
-                        );
-
-                    if (diff <= threshold) {
-
-                        selectedFrames.add(i);
-                        markedCount++;
-                        continue;
-                    }
-                }
-
-                referenceGray = gray;
             }
 
-            lastSelectedFrameIndex = null;
-
-            renderFramesGrid();
-            updateFrameCount();
-            updateCropPreview();
-            updateSpeedPreview();
-
-            alert(
-                `Rilevati e selezionati ${markedCount} ` +
-                `fotogrammi simili (soglia ${threshold}%).`
-            );
+            referenceGray = gray;
         }
-    );
+
+        lastSelectedFrameIndex = null;
+
+        renderFramesGrid();
+        updateFrameCount();
+        updateCropPreview();
+        updateSpeedPreview();
+        updateAnimPreview();
+
+        alert(
+            `Detected and selected ${markedCount} ` +
+            `similar frames (threshold ${threshold}%).`
+        );
+    });
 }
 
 
 /* ============================================================
    RIMUOVI SELEZIONATI DALLA VISTA
-   ============================================================
-
-   A differenza della semplice selezione (che esclude solo
-   dall'export), questo pulsante toglie fisicamente i
-   fotogrammi selezionati dall'elenco: utile per alleggerire
-   la griglia su GIF con molti fotogrammi.
-
-   L'azione è reversibile con "Annulla".
    ============================================================ */
 
-const removeSelectedButton =
-    $("remove-selected");
-
+const removeSelectedButton = $("remove-selected");
 
 if (removeSelectedButton) {
 
-    removeSelectedButton.addEventListener(
-        "click",
-        function () {
+    removeSelectedButton.addEventListener("click", function () {
 
-            if (selectedFrames.size === 0) {
+        if (selectedFrames.size === 0) {
 
-                alert(
-                    "Nessun fotogramma selezionato da rimuovere."
-                );
+            alert(
+                "No frames selected to remove."
+            );
 
-                return;
-            }
-
-            pushUndoSnapshot();
-
-            const kept = [];
-
-            for (let i = 0; i < composedFrames.length; i++) {
-
-                if (!selectedFrames.has(i)) {
-                    kept.push(composedFrames[i]);
-                }
-            }
-
-            composedFrames = kept;
-
-            selectedFrames.clear();
-
-            lastSelectedFrameIndex = null;
-
-            renderFramesGrid();
-            updateFrameCount();
-            updateCropPreview();
-            updateSpeedPreview();
+            return;
         }
-    );
+
+        pushUndoSnapshot();
+
+        const kept = [];
+
+        for (let i = 0; i < composedFrames.length; i++) {
+
+            if (!selectedFrames.has(i)) {
+                kept.push(composedFrames[i]);
+            }
+        }
+
+        composedFrames = kept;
+
+        selectedFrames.clear();
+
+        lastSelectedFrameIndex = null;
+
+        renderFramesGrid();
+        updateFrameCount();
+        updateCropPreview();
+        updateSpeedPreview();
+        updateAnimPreview();
+    });
+}
+
+
+/* ============================================================
+   SVUOTA TUTTO
+   ============================================================ */
+
+const clearAllButton = $("clear-all");
+
+if (clearAllButton) {
+
+    clearAllButton.addEventListener("click", function () {
+
+        if (
+            composedFrames.length === 0 &&
+            importFrames.length === 0
+        ) {
+            return;
+        }
+
+        const ok = confirm(
+            "Clear everything?\n\n" +
+            "All frames, crop, speed, and previews will " +
+            "be removed."
+        );
+
+        if (!ok) {
+            return;
+        }
+
+        /* Ferma eventuale anteprima animata */
+        stopAnimPreview();
+
+        /* Reset dati */
+        originalFrames = [];
+        composedFrames = [];
+
+        selectedFrames.clear();
+
+        undoStack = [];
+
+        lastSelectedFrameIndex = null;
+
+        gifWidth = 0;
+        gifHeight = 0;
+
+        cropRect = { x: 0, y: 0, width: 0, height: 0 };
+
+        cropInteraction = null;
+        cropPreviewOverrideIndex = null;
+
+        speedMultiplier = 1;
+
+        currentExportData = null;
+
+        animCurrentIndex = -1;
+
+        /* Reset import */
+        importFrames = [];
+        importGifWidth = 0;
+        importGifHeight = 0;
+        importPreviewOverrideIndex = null;
+        importDragState = null;
+
+        /* Reset UI */
+        const speedSliderReset = $("speed-slider");
+
+        if (speedSliderReset) {
+            speedSliderReset.value = "1";
+        }
+
+        const exportQualityReset = $("export-quality");
+
+        if (exportQualityReset) {
+            exportQualityReset.value = "10";
+        }
+
+        updateExportQualityLabel();
+
+        const pingPongReset = $("pingpong-toggle");
+
+        if (pingPongReset) {
+            pingPongReset.checked = false;
+        }
+
+        const thumbReset = $("thumb-size-slider");
+
+        if (thumbReset) {
+
+            thumbReset.value = "80";
+
+            document.documentElement.style.setProperty(
+                "--thumb-size",
+                "80px"
+            );
+
+            updateThumbSizeLabel();
+        }
+
+        if (exportStatus) exportStatus.textContent = "";
+        if (exportSummary) exportSummary.textContent = "";
+
+        if (exportPreview) {
+
+            exportPreview.src = "";
+
+            exportPreview.style.display = "none";
+        }
+
+        if (frameCount) {
+            frameCount.textContent = "0 frames";
+        }
+
+        if (gifDimensions) {
+            gifDimensions.textContent = "-";
+        }
+
+        const oldDownloadButton = $("download-gif");
+
+        if (oldDownloadButton) {
+            oldDownloadButton.remove();
+        }
+
+        if (framesGrid) {
+            framesGrid.innerHTML = "";
+        }
+
+        /* Reset canvas anteprima animata */
+        if (previewAnimCanvas) {
+
+            previewAnimCanvas.width = 1;
+            previewAnimCanvas.height = 1;
+            previewAnimCanvas.style.width = "1px";
+            previewAnimCanvas.style.height = "1px";
+        }
+
+        if (previewAnimFrameLabel) {
+            previewAnimFrameLabel.textContent = "-";
+        }
+
+        if (previewAnimDelayLabel) {
+            previewAnimDelayLabel.textContent = "-";
+        }
+
+        if (cropSelection) {
+            cropSelection.style.display = "none";
+        }
+
+        if (fileInput) {
+            fileInput.value = "";
+        }
+
+        /* Nascondi errori */
+        hideErrorBox("load-error-box");
+        hideErrorBox("import-error-box");
+        hideErrorBox("export-error-box");
+
+        updateFileButtonState();
+
+        updateSpeedPreview();
+
+        updateTabStates();
+
+        switchTab("load");
+    });
 }
 
 
@@ -1602,25 +2055,19 @@ if (removeSelectedButton) {
 
 function updateFrameCount() {
 
-    if (!frameCount) {
-        return;
+    if (frameCount) {
+
+        const total = composedFrames.length;
+        const removed = selectedFrames.size;
+        const active = total - removed;
+
+        frameCount.textContent =
+            `${active} active frames (${removed} removed)`;
     }
 
-
-    const total =
-        composedFrames.length;
-
-
-    const removed =
-        selectedFrames.size;
-
-
-    const active =
-        total - removed;
-
-
-    frameCount.textContent =
-        `${active} fotogrammi attivi (${removed} rimossi)`;
+    if (typeof updateTabCounters === "function") {
+        updateTabCounters();
+    }
 }
 
 
@@ -1630,34 +2077,19 @@ function updateFrameCount() {
 
 function getFirstActiveFrameIndex() {
 
-    for (
-        let i = 0;
-        i < composedFrames.length;
-        i++
-    ) {
+    for (let i = 0; i < composedFrames.length; i++) {
 
-        if (
-            !selectedFrames.has(i)
-        ) {
-
+        if (!selectedFrames.has(i)) {
             return i;
         }
     }
-
 
     return -1;
 }
 
 
 /* ============================================================
-   FOTOGRAMMA SCELTO MANUALMENTE PER L'ANTEPRIMA DI CROP
-   ============================================================
-
-   Se l'utente ha inserito un numero di fotogramma valido
-   nel pannello di ritaglio, usiamo quello al posto del
-   primo fotogramma attivo (indipendentemente dal fatto
-   che sia selezionato/escluso dall'export: qui stiamo
-   solo scegliendo cosa vedere per impostare il ritaglio).
+   FRAME SCELTO MANUALMENTE PER L'ANTEPRIMA DI CROP
    ============================================================ */
 
 function getCropPreviewFrameIndex() {
@@ -1667,7 +2099,6 @@ function getCropPreviewFrameIndex() {
         cropPreviewOverrideIndex >= 0 &&
         cropPreviewOverrideIndex < composedFrames.length
     ) {
-
         return cropPreviewOverrideIndex;
     }
 
@@ -1685,52 +2116,27 @@ function updateCropPreview() {
         return;
     }
 
-
-    const index =
-        getCropPreviewFrameIndex();
-
+    const index = getCropPreviewFrameIndex();
 
     if (index === -1) {
 
         if (cropSelection) {
-
-            cropSelection.style.display =
-                "none";
+            cropSelection.style.display = "none";
         }
 
         return;
     }
 
+    const frame = composedFrames[index];
 
-    const frame =
-        composedFrames[index];
+    cropCanvas.width = gifWidth;
+    cropCanvas.height = gifHeight;
 
+    const ctx = cropCanvas.getContext("2d");
 
-    cropCanvas.width =
-        gifWidth;
+    ctx.clearRect(0, 0, gifWidth, gifHeight);
 
-    cropCanvas.height =
-        gifHeight;
-
-
-    const ctx =
-        cropCanvas.getContext("2d");
-
-
-    ctx.clearRect(
-        0,
-        0,
-        gifWidth,
-        gifHeight
-    );
-
-
-    ctx.drawImage(
-        frame.canvas,
-        0,
-        0
-    );
-
+    ctx.drawImage(frame.canvas, 0, 0);
 
     resizeCropCanvasDisplay();
 
@@ -1744,55 +2150,29 @@ function updateCropPreview() {
 
 function resizeCropCanvasDisplay() {
 
-    if (
-        !cropCanvas ||
-        !gifWidth ||
-        !gifHeight
-    ) {
-
+    if (!cropCanvas || !gifWidth || !gifHeight) {
         return;
     }
-
 
     const maxWidth = 850;
     const maxHeight = 500;
 
+    const scale = Math.min(
+        1,
+        maxWidth / gifWidth,
+        maxHeight / gifHeight
+    );
 
-    const scale =
-        Math.min(
-            1,
-            maxWidth / gifWidth,
-            maxHeight / gifHeight
-        );
+    const displayWidth = Math.round(gifWidth * scale);
+    const displayHeight = Math.round(gifHeight * scale);
 
-
-    const displayWidth =
-        Math.round(
-            gifWidth * scale
-        );
-
-
-    const displayHeight =
-        Math.round(
-            gifHeight * scale
-        );
-
-
-    cropCanvas.style.width =
-        `${displayWidth}px`;
-
-
-    cropCanvas.style.height =
-        `${displayHeight}px`;
-
+    cropCanvas.style.width = `${displayWidth}px`;
+    cropCanvas.style.height = `${displayHeight}px`;
 
     if (cropContainer) {
 
-        cropContainer.style.width =
-            `${displayWidth}px`;
-
-        cropContainer.style.height =
-            `${displayHeight}px`;
+        cropContainer.style.width = `${displayWidth}px`;
+        cropContainer.style.height = `${displayHeight}px`;
     }
 }
 
@@ -1804,43 +2184,27 @@ function resizeCropCanvasDisplay() {
 function resetCrop() {
 
     cropRect = {
-
         x: 0,
-
         y: 0,
-
         width: gifWidth,
-
         height: gifHeight
     };
-
 
     updateCropSelectionDisplay();
 }
 
-
-/* ============================================================
-   PULSANTE RESET CROP
-   ============================================================ */
-
-const resetCropButton =
-    $("reset-crop");
-
+const resetCropButton = $("reset-crop");
 
 if (resetCropButton) {
 
-    resetCropButton.addEventListener(
-        "click",
-        function () {
-
-            resetCrop();
-        }
-    );
+    resetCropButton.addEventListener("click", function () {
+        resetCrop();
+    });
 }
 
 
 /* ============================================================
-   SCELTA MANUALE DEL FOTOGRAMMA DA MOSTRARE NEL CROP
+   SCELTA MANUALE DEL FRAME DA MOSTRARE NEL CROP
    ============================================================ */
 
 const cropPreviewFrameInput = $("crop-preview-frame");
@@ -1875,13 +2239,9 @@ function applyCropPreviewFrameChoice() {
 
 if (cropPreviewRefreshButton) {
 
-    cropPreviewRefreshButton.addEventListener(
-        "click",
-        function () {
-
-            applyCropPreviewFrameChoice();
-        }
-    );
+    cropPreviewRefreshButton.addEventListener("click", function () {
+        applyCropPreviewFrameChoice();
+    });
 }
 
 if (cropPreviewFrameInput) {
@@ -1913,79 +2273,39 @@ function updateCropSelectionDisplay() {
         !gifWidth ||
         !gifHeight
     ) {
-
         return;
     }
 
+    const rect = cropCanvas.getBoundingClientRect();
 
-    const rect =
-        cropCanvas.getBoundingClientRect();
-
-
-    if (
-        rect.width <= 0 ||
-        rect.height <= 0
-    ) {
-
+    if (rect.width <= 0 || rect.height <= 0) {
         return;
     }
 
+    const scaleX = rect.width / gifWidth;
+    const scaleY = rect.height / gifHeight;
 
-    const scaleX =
-        rect.width / gifWidth;
+    cropSelection.style.display = "block";
 
+    cropSelection.style.left = `${cropRect.x * scaleX}px`;
+    cropSelection.style.top = `${cropRect.y * scaleY}px`;
+    cropSelection.style.width = `${cropRect.width * scaleX}px`;
+    cropSelection.style.height = `${cropRect.height * scaleY}px`;
 
-    const scaleY =
-        rect.height / gifHeight;
+    if (cropX) cropX.textContent = Math.round(cropRect.x);
+    if (cropY) cropY.textContent = Math.round(cropRect.y);
+    if (cropWidth) cropWidth.textContent = Math.round(cropRect.width);
+    if (cropHeight) cropHeight.textContent = Math.round(cropRect.height);
 
-
-    cropSelection.style.display =
-        "block";
-
-
-    cropSelection.style.left =
-        `${cropRect.x * scaleX}px`;
-
-
-    cropSelection.style.top =
-        `${cropRect.y * scaleY}px`;
-
-
-    cropSelection.style.width =
-        `${cropRect.width * scaleX}px`;
-
-
-    cropSelection.style.height =
-        `${cropRect.height * scaleY}px`;
-
-
-    if (cropX) {
-
-        cropX.textContent =
-            Math.round(cropRect.x);
-    }
-
-
-    if (cropY) {
-
-        cropY.textContent =
-            Math.round(cropRect.y);
-    }
-
-
-    if (cropWidth) {
-
-        cropWidth.textContent =
-            Math.round(cropRect.width);
-    }
-
-
-    if (cropHeight) {
-
-        cropHeight.textContent =
-            Math.round(cropRect.height);
+    if (typeof updateTabCounters === "function") {
+        updateTabCounters();
     }
 }
+
+
+/* ============================================================
+   INIZIO PARTE 3/3
+   ============================================================ */
 
 
 /* ============================================================
@@ -1999,48 +2319,27 @@ if (cropSelection) {
         function (event) {
 
             event.preventDefault();
-
             event.stopPropagation();
 
-
-            const handle =
-                event.target.dataset.handle;
-
+            const handle = event.target.dataset.handle;
 
             cropInteraction = {
 
-                mode:
-                    handle || "move",
+                mode: handle || "move",
 
-                startX:
-                    event.clientX,
-
-                startY:
-                    event.clientY,
+                startX: event.clientX,
+                startY: event.clientY,
 
                 original: {
-
-                    x:
-                        cropRect.x,
-
-                    y:
-                        cropRect.y,
-
-                    width:
-                        cropRect.width,
-
-                    height:
-                        cropRect.height
+                    x: cropRect.x,
+                    y: cropRect.y,
+                    width: cropRect.width,
+                    height: cropRect.height
                 }
             };
 
-
             try {
-
-                cropSelection.setPointerCapture(
-                    event.pointerId
-                );
-
+                cropSelection.setPointerCapture(event.pointerId);
             }
             catch (error) {
                 /* ignoriamo */
@@ -2061,325 +2360,122 @@ if (cropSelection) {
                 return;
             }
 
-
             event.preventDefault();
 
+            const rect = cropCanvas.getBoundingClientRect();
 
-            const rect =
-                cropCanvas.getBoundingClientRect();
-
-
-            if (
-                rect.width <= 0 ||
-                rect.height <= 0
-            ) {
-
+            if (rect.width <= 0 || rect.height <= 0) {
                 return;
             }
 
-
-            const scaleX =
-                gifWidth / rect.width;
-
-
-            const scaleY =
-                gifHeight / rect.height;
-
+            const scaleX = gifWidth / rect.width;
+            const scaleY = gifHeight / rect.height;
 
             const dx =
-                (event.clientX -
-                    cropInteraction.startX) *
-                scaleX;
-
+                (event.clientX - cropInteraction.startX) * scaleX;
 
             const dy =
-                (event.clientY -
-                    cropInteraction.startY) *
-                scaleY;
+                (event.clientY - cropInteraction.startY) * scaleY;
 
+            const original = cropInteraction.original;
 
-            const original =
-                cropInteraction.original;
-
-
-            let x =
-                original.x;
-
-            let y =
-                original.y;
-
-            let width =
-                original.width;
-
-            let height =
-                original.height;
-
+            let x = original.x;
+            let y = original.y;
+            let width = original.width;
+            let height = original.height;
 
             const minSize = 2;
 
+            if (cropInteraction.mode === "move") {
 
-            /* --------------------------------------------
-               MOVE
-               -------------------------------------------- */
+                x = original.x + dx;
+                y = original.y + dy;
 
-            if (
-                cropInteraction.mode === "move"
-            ) {
+                x = Math.max(
+                    0,
+                    Math.min(x, gifWidth - original.width)
+                );
 
-                x =
-                    original.x + dx;
-
-                y =
-                    original.y + dy;
-
-
-                x =
-                    Math.max(
-                        0,
-                        Math.min(
-                            x,
-                            gifWidth -
-                            original.width
-                        )
-                    );
-
-
-                y =
-                    Math.max(
-                        0,
-                        Math.min(
-                            y,
-                            gifHeight -
-                            original.height
-                        )
-                    );
+                y = Math.max(
+                    0,
+                    Math.min(y, gifHeight - original.height)
+                );
             }
+            else if (cropInteraction.mode === "nw") {
 
+                x = original.x + dx;
+                y = original.y + dy;
 
-            /* --------------------------------------------
-               NW
-               -------------------------------------------- */
-
-            else if (
-                cropInteraction.mode === "nw"
-            ) {
-
-                x =
-                    original.x + dx;
-
-                y =
-                    original.y + dy;
-
-                width =
-                    original.width - dx;
-
-                height =
-                    original.height - dy;
-
+                width = original.width - dx;
+                height = original.height - dy;
 
                 if (width < minSize) {
-
                     width = minSize;
-
-                    x =
-                        original.x +
-                        original.width -
-                        minSize;
+                    x = original.x + original.width - minSize;
                 }
 
-
                 if (height < minSize) {
-
                     height = minSize;
-
-                    y =
-                        original.y +
-                        original.height -
-                        minSize;
+                    y = original.y + original.height - minSize;
                 }
 
-
-                x =
-                    Math.max(
-                        0,
-                        x
-                    );
-
-                y =
-                    Math.max(
-                        0,
-                        y
-                    );
+                x = Math.max(0, x);
+                y = Math.max(0, y);
             }
+            else if (cropInteraction.mode === "ne") {
 
-
-            /* --------------------------------------------
-               NE
-               -------------------------------------------- */
-
-            else if (
-                cropInteraction.mode === "ne"
-            ) {
-
-                y =
-                    original.y + dy;
-
-                width =
-                    original.width + dx;
-
-                height =
-                    original.height - dy;
-
+                y = original.y + dy;
+                width = original.width + dx;
+                height = original.height - dy;
 
                 if (width < minSize) {
-
-                    width =
-                        minSize;
+                    width = minSize;
                 }
-
 
                 if (height < minSize) {
-
-                    height =
-                        minSize;
-
-                    y =
-                        original.y +
-                        original.height -
-                        minSize;
+                    height = minSize;
+                    y = original.y + original.height - minSize;
                 }
 
-
-                width =
-                    Math.min(
-                        width,
-                        gifWidth -
-                        original.x
-                    );
-
-
-                y =
-                    Math.max(
-                        0,
-                        y
-                    );
+                width = Math.min(width, gifWidth - original.x);
+                y = Math.max(0, y);
             }
+            else if (cropInteraction.mode === "sw") {
 
-
-            /* --------------------------------------------
-               SW
-               -------------------------------------------- */
-
-            else if (
-                cropInteraction.mode === "sw"
-            ) {
-
-                x =
-                    original.x + dx;
-
-                width =
-                    original.width - dx;
-
-                height =
-                    original.height + dy;
-
+                x = original.x + dx;
+                width = original.width - dx;
+                height = original.height + dy;
 
                 if (width < minSize) {
-
-                    width =
-                        minSize;
-
-                    x =
-                        original.x +
-                        original.width -
-                        minSize;
+                    width = minSize;
+                    x = original.x + original.width - minSize;
                 }
-
 
                 if (height < minSize) {
-
-                    height =
-                        minSize;
+                    height = minSize;
                 }
 
-
-                x =
-                    Math.max(
-                        0,
-                        x
-                    );
-
-
-                height =
-                    Math.min(
-                        height,
-                        gifHeight -
-                        original.y
-                    );
+                x = Math.max(0, x);
+                height = Math.min(height, gifHeight - original.y);
             }
+            else if (cropInteraction.mode === "se") {
 
+                width = original.width + dx;
+                height = original.height + dy;
 
-            /* --------------------------------------------
-               SE
-               -------------------------------------------- */
+                width = Math.max(minSize, width);
+                height = Math.max(minSize, height);
 
-            else if (
-                cropInteraction.mode === "se"
-            ) {
-
-                width =
-                    original.width + dx;
-
-                height =
-                    original.height + dy;
-
-
-                width =
-                    Math.max(
-                        minSize,
-                        width
-                    );
-
-
-                height =
-                    Math.max(
-                        minSize,
-                        height
-                    );
-
-
-                width =
-                    Math.min(
-                        width,
-                        gifWidth -
-                        original.x
-                    );
-
-
-                height =
-                    Math.min(
-                        height,
-                        gifHeight -
-                        original.y
-                    );
+                width = Math.min(width, gifWidth - original.x);
+                height = Math.min(height, gifHeight - original.y);
             }
-
 
             cropRect = {
-
-                x:
-                    Math.round(x),
-
-                y:
-                    Math.round(y),
-
-                width:
-                    Math.round(width),
-
-                height:
-                    Math.round(height)
+                x: Math.round(x),
+                y: Math.round(y),
+                width: Math.round(width),
+                height: Math.round(height)
             };
-
 
             updateCropSelectionDisplay();
         }
@@ -2387,7 +2483,7 @@ if (cropSelection) {
 
 
     /* ========================================================
-       POINTER UP
+       POINTER UP / CANCEL
        ======================================================== */
 
     cropSelection.addEventListener(
@@ -2396,13 +2492,8 @@ if (cropSelection) {
 
             cropInteraction = null;
 
-
             try {
-
-                cropSelection.releasePointerCapture(
-                    event.pointerId
-                );
-
+                cropSelection.releasePointerCapture(event.pointerId);
             }
             catch (error) {
                 /* ignoriamo */
@@ -2410,11 +2501,9 @@ if (cropSelection) {
         }
     );
 
-
     cropSelection.addEventListener(
         "pointercancel",
         function () {
-
             cropInteraction = null;
         }
     );
@@ -2430,33 +2519,16 @@ window.addEventListener(
     function () {
 
         resizeCropCanvasDisplay();
-
         updateCropSelectionDisplay();
-
         resizeImportWindowDisplay();
-
         updateImportTransformDisplay();
+        resizeAnimPreviewCanvas();
     }
 );
 
 
 /* ============================================================
    AGGIUNTA DI UNA SECONDA GIF IN CODA
-   ============================================================
-
-   Il pulsante "+" nella toolbar dei fotogrammi apre un
-   pannello dedicato dove l'utente può caricare una seconda
-   GIF, posizionarla (trascinamento + zoom) dentro una
-   finestra fissa che rappresenta le dimensioni della GIF
-   principale (esattamente come il ritaglio circolare di un
-   avatar), scegliere un colore di sfondo per le zone
-   scoperte e infine accodare i fotogrammi risultanti in
-   fondo a "composedFrames".
-
-   Vengono mantenuti solo i fotogrammi (immagine + delay
-   originale) della seconda GIF: velocità, ping-pong e
-   crop restano proprietà globali dell'esportazione e si
-   applicano automaticamente anche ai fotogrammi importati.
    ============================================================ */
 
 let importFrames = [];
@@ -2478,9 +2550,6 @@ const importWorkspace = $("import-workspace");
 const importWindow = $("import-window");
 const importDragCanvas = $("import-drag-canvas");
 
-const addGifQueueButton = $("add-gif-queue");
-const importGifFileInput = $("import-gif-file");
-
 const importPreviewFrameInput = $("import-preview-frame");
 const importPreviewRefreshButton = $("import-preview-refresh");
 
@@ -2497,255 +2566,96 @@ const importTargetDimsLabel = $("import-target-dims");
 
 
 /* ----------------------------------------------------------
-   APERTURA PANNELLO (pulsante "+")
-   ---------------------------------------------------------- */
-
-if (addGifQueueButton) {
-
-    addGifQueueButton.addEventListener(
-        "click",
-        function () {
-
-            if (composedFrames.length === 0) {
-
-                alert(
-                    "Carica prima una GIF principale."
-                );
-
-                return;
-            }
-
-            if (importGifFileInput) {
-
-                importGifFileInput.click();
-            }
-        }
-    );
-}
-
-
-/* ----------------------------------------------------------
    CARICAMENTO DELLA SECONDA GIF
    ---------------------------------------------------------- */
 
-if (importGifFileInput) {
-
-    importGifFileInput.addEventListener(
-        "change",
-        async function (event) {
-
-            const file =
-                event.target.files[0];
-
-            if (!file) {
-                return;
-            }
-
-
-            if (
-                file.type !== "image/gif" &&
-                !file.name
-                    .toLowerCase()
-                    .endsWith(".gif")
-            ) {
-
-                alert(
-                    "Il file selezionato non è una GIF."
-                );
-
-                importGifFileInput.value = "";
-
-                return;
-            }
-
-
-            try {
-
-                const buffer =
-                    await file.arrayBuffer();
-
-
-                await loadImportGif(
-                    buffer
-                );
-            }
-            catch (error) {
-
-                console.error(
-                    "ERRORE IMPORT GIF:",
-                    error
-                );
-
-
-                alert(
-                    "Impossibile leggere la GIF da " +
-                    "accodare.\n\nErrore: " +
-                    error.message
-                );
-            }
-            finally {
-
-                importGifFileInput.value = "";
-            }
-        }
-    );
-}
-
 async function loadImportGif(buffer) {
 
-    const gifuct =
-        getGifuct();
-
+    const gifuct = getGifuct();
 
     if (!gifuct) {
-
-        throw new Error(
-            "gifuct-js non è stato trovato."
-        );
+        throw new Error("gifuct-js was not found.");
     }
-
 
     let gif = null;
     let frames = null;
 
-
     if (gifuct.type === "modern") {
 
-        gif =
-            gifuct.library.parseGIF(
-                buffer
-            );
+        gif = gifuct.library.parseGIF(buffer);
 
-
-        frames =
-            gifuct.library.decompressFrames(
-                gif,
-                true
-            );
+        frames = gifuct.library.decompressFrames(gif, true);
     }
-
     else if (gifuct.type === "legacy") {
 
-        const decoder =
-            new gifuct.library(
-                buffer
-            );
+        const decoder = new gifuct.library(buffer);
 
-
-        frames =
-            decoder.decompressFrames(
-                true
-            );
+        frames = decoder.decompressFrames(true);
     }
 
-
-    if (
-        !frames ||
-        !Array.isArray(frames) ||
-        frames.length === 0
-    ) {
-
+    if (!frames || !Array.isArray(frames) || frames.length === 0) {
         throw new Error(
-            "Nessun fotogramma trovato nella GIF " +
-            "da accodare."
+            "No frames found in the GIF to append."
         );
     }
-
 
     let w = 0;
     let h = 0;
 
-
-    if (
-        gif &&
-        gif.lsd &&
-        gif.lsd.width &&
-        gif.lsd.height
-    ) {
-
+    if (gif && gif.lsd && gif.lsd.width && gif.lsd.height) {
         w = gif.lsd.width;
         h = gif.lsd.height;
     }
-
     else if (frames[0].dims) {
-
         w = frames[0].dims.width;
         h = frames[0].dims.height;
     }
 
-
     if (!w || !h) {
-
         throw new Error(
-            "Impossibile determinare le dimensioni " +
-            "della GIF da accodare."
+            "Could not determine the GIF dimensions " +
+            "of the file to append."
         );
     }
 
-
-    importFrames =
-        composeAllFrames(
-            frames,
-            w,
-            h
-        );
+    importFrames = composeAllFrames(frames, w, h);
 
     importGifWidth = w;
     importGifHeight = h;
 
-
     if (!importFrames.length) {
-
         throw new Error(
-            "Impossibile ricostruire i fotogrammi " +
-            "della GIF da accodare."
+            "Could not rebuild the frames of the GIF to append."
         );
     }
 
-
     importPreviewOverrideIndex = null;
-
 
     if (importPreviewFrameInput) {
 
         importPreviewFrameInput.value = "1";
-
-        importPreviewFrameInput.max =
-            importFrames.length;
+        importPreviewFrameInput.max = importFrames.length;
     }
 
-
     if (importTargetDimsLabel) {
-
         importTargetDimsLabel.textContent =
             `${gifWidth} × ${gifHeight} px`;
     }
 
-
     if (importBgColorInput) {
-
         importBackgroundColor =
             importBgColorInput.value || "#ffffff";
     }
 
-
     applyImportPreset("cover");
 
-
-    if (importWorkspace) {
-
-        importWorkspace.style.display = "block";
-
-        importWorkspace.scrollIntoView(
-            {
-                behavior: "smooth",
-                block: "start"
-            }
-        );
-    }
-
-
     renderImportPreviewFrame();
+
+    /* Aggiorna stato tab e passa a "Queue" */
+
+    updateTabStates();
+
+    switchTab("import");
 }
 
 
@@ -2760,7 +2670,6 @@ function getImportPreviewFrameIndex() {
         importPreviewOverrideIndex >= 0 &&
         importPreviewOverrideIndex < importFrames.length
     ) {
-
         return importPreviewOverrideIndex;
     }
 
@@ -2769,48 +2678,22 @@ function getImportPreviewFrameIndex() {
 
 function renderImportPreviewFrame() {
 
-    if (
-        !importDragCanvas ||
-        importFrames.length === 0
-    ) {
-
+    if (!importDragCanvas || importFrames.length === 0) {
         return;
     }
 
+    const index = getImportPreviewFrameIndex();
 
-    const index =
-        getImportPreviewFrameIndex();
+    const frame = importFrames[index];
 
+    importDragCanvas.width = importGifWidth;
+    importDragCanvas.height = importGifHeight;
 
-    const frame =
-        importFrames[index];
+    const ctx = importDragCanvas.getContext("2d");
 
+    ctx.clearRect(0, 0, importGifWidth, importGifHeight);
 
-    importDragCanvas.width =
-        importGifWidth;
-
-    importDragCanvas.height =
-        importGifHeight;
-
-
-    const ctx =
-        importDragCanvas.getContext("2d");
-
-
-    ctx.clearRect(
-        0,
-        0,
-        importGifWidth,
-        importGifHeight
-    );
-
-
-    ctx.drawImage(
-        frame.canvas,
-        0,
-        0
-    );
-
+    ctx.drawImage(frame.canvas, 0, 0);
 
     resizeImportWindowDisplay();
 
@@ -2822,7 +2705,6 @@ if (importPreviewRefreshButton) {
     importPreviewRefreshButton.addEventListener(
         "click",
         function () {
-
             applyImportPreviewFrameChoice();
         }
     );
@@ -2846,38 +2728,23 @@ if (importPreviewFrameInput) {
 
 function applyImportPreviewFrameChoice() {
 
-    if (
-        !importPreviewFrameInput ||
-        importFrames.length === 0
-    ) {
-
+    if (!importPreviewFrameInput || importFrames.length === 0) {
         return;
     }
 
-
-    let n =
-        parseInt(
-            importPreviewFrameInput.value,
-            10
-        );
-
+    let n = parseInt(importPreviewFrameInput.value, 10);
 
     if (!Number.isFinite(n) || n < 1) {
-
         n = 1;
     }
 
-
     if (n > importFrames.length) {
-
         n = importFrames.length;
     }
-
 
     importPreviewFrameInput.value = n;
 
     importPreviewOverrideIndex = n - 1;
-
 
     renderImportPreviewFrame();
 }
@@ -2885,50 +2752,28 @@ function applyImportPreviewFrameChoice() {
 
 /* ----------------------------------------------------------
    DIMENSIONI DISPLAY DELLA FINESTRA DI IMPORT
-   (rappresenta le dimensioni fisse della GIF principale)
    ---------------------------------------------------------- */
 
 function resizeImportWindowDisplay() {
 
-    if (
-        !importWindow ||
-        !gifWidth ||
-        !gifHeight
-    ) {
-
+    if (!importWindow || !gifWidth || !gifHeight) {
         return;
     }
-
 
     const maxWidth = 850;
     const maxHeight = 500;
 
+    const scale = Math.min(
+        1,
+        maxWidth / gifWidth,
+        maxHeight / gifHeight
+    );
 
-    const scale =
-        Math.min(
-            1,
-            maxWidth / gifWidth,
-            maxHeight / gifHeight
-        );
+    const displayWidth = Math.round(gifWidth * scale);
+    const displayHeight = Math.round(gifHeight * scale);
 
-
-    const displayWidth =
-        Math.round(
-            gifWidth * scale
-        );
-
-
-    const displayHeight =
-        Math.round(
-            gifHeight * scale
-        );
-
-
-    importWindow.style.width =
-        `${displayWidth}px`;
-
-    importWindow.style.height =
-        `${displayHeight}px`;
+    importWindow.style.width = `${displayWidth}px`;
+    importWindow.style.height = `${displayHeight}px`;
 }
 
 
@@ -2944,57 +2789,34 @@ function updateImportTransformDisplay() {
         !gifWidth ||
         !gifHeight
     ) {
-
         return;
     }
 
+    importWindow.style.background = importBackgroundColor;
 
-    importWindow.style.background =
-        importBackgroundColor;
-
-
-    const rect =
-        importWindow.getBoundingClientRect();
-
+    const rect = importWindow.getBoundingClientRect();
 
     if (rect.width <= 0) {
-
         return;
     }
 
-
-    const displayScale =
-        rect.width / gifWidth;
-
+    const displayScale = rect.width / gifWidth;
 
     const drawWidth =
-        importGifWidth *
-        importScale *
-        displayScale;
-
+        importGifWidth * importScale * displayScale;
 
     const drawHeight =
-        importGifHeight *
-        importScale *
-        displayScale;
+        importGifHeight * importScale * displayScale;
 
-
-    importDragCanvas.style.width =
-        `${drawWidth}px`;
-
-    importDragCanvas.style.height =
-        `${drawHeight}px`;
-
-    importDragCanvas.style.left =
-        `${importPanX * displayScale}px`;
-
-    importDragCanvas.style.top =
-        `${importPanY * displayScale}px`;
+    importDragCanvas.style.width = `${drawWidth}px`;
+    importDragCanvas.style.height = `${drawHeight}px`;
+    importDragCanvas.style.left = `${importPanX * displayScale}px`;
+    importDragCanvas.style.top = `${importPanY * displayScale}px`;
 }
 
 
 /* ----------------------------------------------------------
-   PRESET: ADATTA RIEMPIENDO (cover) / ADATTA CON MARGINI (contain)
+   PRESET: COVER / CONTAIN
    ---------------------------------------------------------- */
 
 function applyImportPreset(kind) {
@@ -3005,35 +2827,27 @@ function applyImportPreset(kind) {
         !gifWidth ||
         !gifHeight
     ) {
-
         return;
     }
 
-
     let scale;
-
 
     if (kind === "contain") {
 
-        scale =
-            Math.min(
-                gifWidth / importGifWidth,
-                gifHeight / importGifHeight
-            );
+        scale = Math.min(
+            gifWidth / importGifWidth,
+            gifHeight / importGifHeight
+        );
     }
-
     else {
 
-        scale =
-            Math.max(
-                gifWidth / importGifWidth,
-                gifHeight / importGifHeight
-            );
+        scale = Math.max(
+            gifWidth / importGifWidth,
+            gifHeight / importGifHeight
+        );
     }
 
-
     importScale = scale;
-
 
     importPanX =
         (gifWidth - importGifWidth * scale) / 2;
@@ -3041,28 +2855,18 @@ function applyImportPreset(kind) {
     importPanY =
         (gifHeight - importGifHeight * scale) / 2;
 
-
     if (importZoomSlider) {
 
-        const minZoom =
-            parseFloat(importZoomSlider.min) || 0.05;
+        const minZoom = parseFloat(importZoomSlider.min) || 0.05;
+        const maxZoom = parseFloat(importZoomSlider.max) || 5;
 
-        const maxZoom =
-            parseFloat(importZoomSlider.max) || 5;
+        const clamped = Math.max(
+            minZoom,
+            Math.min(maxZoom, scale)
+        );
 
-        const clamped =
-            Math.max(
-                minZoom,
-                Math.min(
-                    maxZoom,
-                    scale
-                )
-            );
-
-        importZoomSlider.value =
-            clamped.toFixed(2);
+        importZoomSlider.value = clamped.toFixed(2);
     }
-
 
     updateImportTransformDisplay();
 }
@@ -3072,7 +2876,6 @@ if (importPresetCoverButton) {
     importPresetCoverButton.addEventListener(
         "click",
         function () {
-
             applyImportPreset("cover");
         }
     );
@@ -3083,7 +2886,6 @@ if (importPresetContainButton) {
     importPresetContainButton.addEventListener(
         "click",
         function () {
-
             applyImportPreset("contain");
         }
     );
@@ -3103,13 +2905,6 @@ if (importZoomSlider) {
             const newScale =
                 parseFloat(importZoomSlider.value) || 1;
 
-
-            /*
-               Manteniamo fisso il centro attuale
-               dell'immagine mentre cambia lo zoom,
-               così l'utente non perde il riferimento.
-            */
-
             const centerX =
                 importPanX +
                 (importGifWidth * importScale) / 2;
@@ -3118,18 +2913,13 @@ if (importZoomSlider) {
                 importPanY +
                 (importGifHeight * importScale) / 2;
 
-
             importScale = newScale;
 
-
             importPanX =
-                centerX -
-                (importGifWidth * importScale) / 2;
+                centerX - (importGifWidth * importScale) / 2;
 
             importPanY =
-                centerY -
-                (importGifHeight * importScale) / 2;
-
+                centerY - (importGifHeight * importScale) / 2;
 
             updateImportTransformDisplay();
         }
@@ -3151,7 +2941,6 @@ if (importBgColorInput) {
                 importBgColorInput.value || "#ffffff";
 
             if (importWindow) {
-
                 importWindow.style.background =
                     importBackgroundColor;
             }
@@ -3172,28 +2961,15 @@ if (importDragCanvas) {
 
             event.preventDefault();
 
-
             importDragState = {
-
-                startX:
-                    event.clientX,
-
-                startY:
-                    event.clientY,
-
-                originalPanX:
-                    importPanX,
-
-                originalPanY:
-                    importPanY
+                startX: event.clientX,
+                startY: event.clientY,
+                originalPanX: importPanX,
+                originalPanY: importPanY
             };
 
-
             try {
-
-                importDragCanvas.setPointerCapture(
-                    event.pointerId
-                );
+                importDragCanvas.setPointerCapture(event.pointerId);
             }
             catch (error) {
                 /* ignoriamo */
@@ -3209,41 +2985,26 @@ if (importDragCanvas) {
                 return;
             }
 
-
             event.preventDefault();
 
-
-            const rect =
-                importWindow.getBoundingClientRect();
-
+            const rect = importWindow.getBoundingClientRect();
 
             if (rect.width <= 0) {
                 return;
             }
 
-
-            const displayScale =
-                rect.width / gifWidth;
-
+            const displayScale = rect.width / gifWidth;
 
             const dx =
-                (event.clientX -
-                    importDragState.startX) /
+                (event.clientX - importDragState.startX) /
                 displayScale;
-
 
             const dy =
-                (event.clientY -
-                    importDragState.startY) /
+                (event.clientY - importDragState.startY) /
                 displayScale;
 
-
-            importPanX =
-                importDragState.originalPanX + dx;
-
-            importPanY =
-                importDragState.originalPanY + dy;
-
+            importPanX = importDragState.originalPanX + dx;
+            importPanY = importDragState.originalPanY + dy;
 
             updateImportTransformDisplay();
         }
@@ -3255,9 +3016,7 @@ if (importDragCanvas) {
 
             importDragState = null;
 
-
             try {
-
                 importDragCanvas.releasePointerCapture(
                     event.pointerId
                 );
@@ -3271,7 +3030,6 @@ if (importDragCanvas) {
     importDragCanvas.addEventListener(
         "pointercancel",
         function () {
-
             importDragState = null;
         }
     );
@@ -3293,11 +3051,7 @@ function closeImportWorkspace() {
 
     importDragState = null;
 
-
-    if (importWorkspace) {
-
-        importWorkspace.style.display = "none";
-    }
+    updateTabStates();
 }
 
 if (importCancelButton) {
@@ -3305,7 +3059,6 @@ if (importCancelButton) {
     importCancelButton.addEventListener(
         "click",
         function () {
-
             closeImportWorkspace();
         }
     );
@@ -3321,7 +3074,6 @@ if (importConfirmButton) {
     importConfirmButton.addEventListener(
         "click",
         function () {
-
             confirmImportAppend();
         }
     );
@@ -3331,75 +3083,30 @@ function confirmImportAppend() {
 
     if (importFrames.length === 0) {
 
-        alert(
-            "Nessuna GIF da accodare."
-        );
+        alert("No GIF to append.");
 
         return;
     }
 
-
     pushUndoSnapshot();
 
+    const drawWidth = importGifWidth * importScale;
+    const drawHeight = importGifHeight * importScale;
 
-    const drawWidth =
-        importGifWidth * importScale;
+    for (let i = 0; i < importFrames.length; i++) {
 
-    const drawHeight =
-        importGifHeight * importScale;
+        const sourceFrame = importFrames[i];
 
+        const outCanvas = document.createElement("canvas");
 
-    for (
-        let i = 0;
-        i < importFrames.length;
-        i++
-    ) {
+        outCanvas.width = gifWidth;
+        outCanvas.height = gifHeight;
 
-        const sourceFrame =
-            importFrames[i];
+        const ctx = outCanvas.getContext("2d");
 
+        ctx.fillStyle = importBackgroundColor || "#ffffff";
 
-        const outCanvas =
-            document.createElement("canvas");
-
-
-        outCanvas.width =
-            gifWidth;
-
-        outCanvas.height =
-            gifHeight;
-
-
-        const ctx =
-            outCanvas.getContext("2d");
-
-
-        /*
-           Riempimento di sfondo: copre le zone
-           scoperte quando il fotogramma importato
-           è più piccolo della finestra di GIF1.
-        */
-
-        ctx.fillStyle =
-            importBackgroundColor || "#ffffff";
-
-        ctx.fillRect(
-            0,
-            0,
-            gifWidth,
-            gifHeight
-        );
-
-
-        /*
-           Disegno del fotogramma di GIF2 con la
-           stessa posizione/zoom scelti dall'utente.
-
-           Se il fotogramma è più grande della
-           finestra, la parte eccedente viene
-           semplicemente tagliata (il canvas di
-           destinazione ha dimensioni fisse).
-        */
+        ctx.fillRect(0, 0, gifWidth, gifHeight);
 
         ctx.drawImage(
             sourceFrame.canvas,
@@ -3413,33 +3120,27 @@ function confirmImportAppend() {
             drawHeight
         );
 
-
-        composedFrames.push(
-            {
-
-                canvas: outCanvas,
-
-                delay:
-                    normalizeDelay(
-                        sourceFrame.delay
-                    ),
-
-                disposalType: 0
-            }
-        );
+        composedFrames.push({
+            canvas: outCanvas,
+            delay: normalizeDelay(sourceFrame.delay),
+            disposalType: 0
+        });
     }
-
 
     closeImportWorkspace();
 
-
     renderFramesGrid();
-
     updateFrameCount();
-
     updateCropPreview();
-
     updateSpeedPreview();
+    updateAnimPreview();
+    updateFileButtonState();
+
+    /* Torna alla tab Frames */
+
+    updateTabStates();
+
+    switchTab("frames");
 }
 
 
@@ -3447,59 +3148,35 @@ function confirmImportAppend() {
    CREA CANVAS CROPPATO
    ============================================================ */
 
-function createCroppedCanvas(
-    sourceCanvas
-) {
+function createCroppedCanvas(sourceCanvas) {
 
-    const output =
-        document.createElement("canvas");
+    const output = document.createElement("canvas");
 
-
-    output.width =
-        Math.max(
-            1,
-            Math.round(
-                cropRect.width
-            )
-        );
-
-
-    output.height =
-        Math.max(
-            1,
-            Math.round(
-                cropRect.height
-            )
-        );
-
-
-    const ctx =
-        output.getContext("2d");
-
-
-    ctx.clearRect(
-        0,
-        0,
-        output.width,
-        output.height
+    output.width = Math.max(
+        1,
+        Math.round(cropRect.width)
     );
 
+    output.height = Math.max(
+        1,
+        Math.round(cropRect.height)
+    );
+
+    const ctx = output.getContext("2d");
+
+    ctx.clearRect(0, 0, output.width, output.height);
 
     ctx.drawImage(
-
         sourceCanvas,
-
         cropRect.x,
         cropRect.y,
         cropRect.width,
         cropRect.height,
-
         0,
         0,
         output.width,
         output.height
     );
-
 
     return output;
 }
@@ -3511,28 +3188,16 @@ function createCroppedCanvas(
 
 function gcd(a, b) {
 
-    a =
-        Math.abs(
-            Math.round(a)
-        );
-
-
-    b =
-        Math.abs(
-            Math.round(b)
-        );
-
+    a = Math.abs(Math.round(a));
+    b = Math.abs(Math.round(b));
 
     while (b !== 0) {
 
-        const temp =
-            a % b;
+        const temp = a % b;
 
         a = b;
-
         b = temp;
     }
-
 
     return a || 1;
 }
@@ -3542,44 +3207,23 @@ function gcd(a, b) {
    DELAY BASE
    ============================================================ */
 
-function calculateBaseDelay(
-    frames
-) {
+function calculateBaseDelay(frames) {
 
-    if (
-        !frames.length
-    ) {
-
+    if (!frames.length) {
         return 100;
     }
 
+    let result = normalizeDelay(frames[0].delay);
 
-    let result =
-        normalizeDelay(
-            frames[0].delay
+    for (let i = 1; i < frames.length; i++) {
+
+        result = gcd(
+            result,
+            normalizeDelay(frames[i].delay)
         );
-
-
-    for (
-        let i = 1;
-        i < frames.length;
-        i++
-    ) {
-
-        result =
-            gcd(
-                result,
-                normalizeDelay(
-                    frames[i].delay
-                )
-            );
     }
 
-
-    return Math.max(
-        10,
-        result
-    );
+    return Math.max(10, result);
 }
 
 
@@ -3607,7 +3251,6 @@ function updateSpeedPreview() {
     const speedDelayPreview = $("speed-delay-preview");
 
     if (speedValueLabel) {
-
         speedValueLabel.textContent =
             speedMultiplier.toFixed(1) + "x";
     }
@@ -3619,6 +3262,7 @@ function updateSpeedPreview() {
         if (activeData.length === 0) {
 
             speedDelayPreview.textContent = "";
+
             return;
         }
 
@@ -3652,7 +3296,7 @@ if (speedSlider) {
 
 
 /* ============================================================
-   SLIDER QUALITÀ EXPORT (etichetta dinamica)
+   SLIDER QUALITÀ EXPORT
    ============================================================ */
 
 const exportQualityInput = $("export-quality");
@@ -3681,24 +3325,17 @@ if (exportQualityInput) {
 
 /* ============================================================
    DIMENSIONE DI UNA DATA URL IN BYTE
-   ============================================================
-
-   Calcola la dimensione reale (in byte) dei dati binari
-   codificati in una data URL base64, tenendo conto del
-   padding finale ("=" oppure "==").
    ============================================================ */
 
 function getDataUrlSizeBytes(dataUrl) {
 
-    const commaIndex =
-        dataUrl.indexOf(",");
+    const commaIndex = dataUrl.indexOf(",");
 
     if (commaIndex === -1) {
         return 0;
     }
 
-    const base64 =
-        dataUrl.slice(commaIndex + 1);
+    const base64 = dataUrl.slice(commaIndex + 1);
 
     let padding = 0;
 
@@ -3709,9 +3346,7 @@ function getDataUrlSizeBytes(dataUrl) {
         padding = 1;
     }
 
-    return Math.floor(
-        (base64.length * 3) / 4
-    ) - padding;
+    return Math.floor((base64.length * 3) / 4) - padding;
 }
 
 
@@ -3719,50 +3354,25 @@ function getDataUrlSizeBytes(dataUrl) {
    PREPARAZIONE FRAME PER ESPORTAZIONE
    ============================================================ */
 
-async function prepareExportImages(
-    activeIndices
-) {
+async function prepareExportImages(activeIndices) {
 
     const images = [];
-
     const activeFrameData = [];
 
+    for (const index of activeIndices) {
 
-    for (
-        const index of activeIndices
-    ) {
+        const frame = composedFrames[index];
 
-        const frame =
-            composedFrames[index];
+        const cropped = createCroppedCanvas(frame.canvas);
 
+        const dataUrl = cropped.toDataURL("image/png");
 
-        const cropped =
-            createCroppedCanvas(
-                frame.canvas
-            );
+        images.push(dataUrl);
 
-
-        const dataUrl =
-            cropped.toDataURL(
-                "image/png"
-            );
-
-
-        images.push(
-            dataUrl
-        );
-
-
-        activeFrameData.push(
-            frame
-        );
+        activeFrameData.push(frame);
     }
 
-
-    return {
-        images,
-        activeFrameData
-    };
+    return { images, activeFrameData };
 }
 
 
@@ -3770,16 +3380,13 @@ async function prepareExportImages(
    PULSANTE ESPORTAZIONE
    ============================================================ */
 
-const exportButton =
-    $("export-gif");
-
+const exportButton = $("export-gif");
 
 if (exportButton) {
 
     exportButton.addEventListener(
         "click",
         async function () {
-
             await exportGif();
         }
     );
@@ -3792,416 +3399,276 @@ if (exportButton) {
 
 async function exportGif() {
 
-    const gifshot =
-        getGifshot();
+    /* Nascondi errori precedenti */
+    hideErrorBox("export-error-box");
 
+    const gifshot = getGifshot();
 
     if (!gifshot) {
 
-        alert(
-            "gifshot non è stato caricato.\n\n" +
-            "Controlla che gifshot.min.js sia presente " +
-            "nella cartella dell'estensione."
+        showErrorBox(
+            "export-error-box",
+            "export-error-message",
+            "export-error-technical",
+            "gifshot was not loaded. Make sure gifshot.min.js " +
+            "is in the extension folder.",
+            null
         );
 
         return;
     }
 
-
-    /* ========================================================
-       FRAME ATTIVI
-       ======================================================== */
+    /* Frame attivi */
 
     const activeIndices = [];
 
+    for (let i = 0; i < composedFrames.length; i++) {
 
-    for (
-        let i = 0;
-        i < composedFrames.length;
-        i++
-    ) {
-
-        if (
-            !selectedFrames.has(i)
-        ) {
-
+        if (!selectedFrames.has(i)) {
             activeIndices.push(i);
         }
     }
 
+    if (activeIndices.length === 0) {
 
-    if (
-        activeIndices.length === 0
-    ) {
-
-        alert(
-            "Non ci sono fotogrammi attivi da esportare."
+        showErrorBox(
+            "export-error-box",
+            "export-error-message",
+            "export-error-technical",
+            "There are no active frames to export.",
+            null
         );
 
         return;
     }
 
+    if (!cropRect.width || !cropRect.height) {
 
-    if (
-        !cropRect.width ||
-        !cropRect.height
-    ) {
-
-        alert(
-            "Il riquadro di crop non è valido."
+        showErrorBox(
+            "export-error-box",
+            "export-error-message",
+            "export-error-technical",
+            "The crop rectangle is not valid.",
+            null
         );
 
         return;
     }
 
+    /* Ping-pong */
 
-    /* ========================================================
-       EFFETTO PING-PONG (opzionale)
-       ========================================================
+    const pingPongToggle = $("pingpong-toggle");
 
-       Se attivo, dopo la sequenza normale ripetiamo i
-       fotogrammi al contrario, escludendo il primo e
-       l'ultimo per evitare una "pausa" visibile nel
-       punto di inversione.
-       ======================================================== */
+    const usePingPong = pingPongToggle
+        ? pingPongToggle.checked
+        : false;
 
-    const pingPongToggle =
-        $("pingpong-toggle");
+    let exportIndices = activeIndices;
 
-    const usePingPong =
-        pingPongToggle
-            ? pingPongToggle.checked
-            : false;
-
-    let exportIndices =
-        activeIndices;
-
-    if (
-        usePingPong &&
-        activeIndices.length > 2
-    ) {
+    if (usePingPong && activeIndices.length > 2) {
 
         const reversedMiddle =
-            activeIndices
-                .slice(1, -1)
-                .reverse();
+            activeIndices.slice(1, -1).reverse();
 
         exportIndices =
-            activeIndices.concat(
-                reversedMiddle
-            );
+            activeIndices.concat(reversedMiddle);
     }
 
-
-    /* ========================================================
-       STATO UI
-       ======================================================== */
+    /* Stato UI */
 
     if (exportButton) {
 
-        exportButton.disabled =
-            true;
-
-        exportButton.textContent =
-            "Creazione GIF...";
+        exportButton.disabled = true;
+        exportButton.textContent = "Creating GIF...";
     }
-
 
     if (exportStatus) {
-
         exportStatus.textContent =
-            "Preparazione dei fotogrammi...";
+            "Preparing frames...";
     }
 
-
     if (exportSummary) {
-
         exportSummary.textContent = "";
     }
 
-
     if (exportPreview) {
-
-        exportPreview.style.display =
-            "none";
+        exportPreview.style.display = "none";
     }
-
 
     try {
 
-        /* ----------------------------------------------------
-           PREPARAZIONE
-           ---------------------------------------------------- */
+        const prepared = await prepareExportImages(
+            exportIndices
+        );
 
-        const prepared =
-            await prepareExportImages(
-                exportIndices
-            );
+        let images = prepared.images;
 
+        const activeFrameData = prepared.activeFrameData;
 
-        let images =
-            prepared.images;
+        const outputWidth = Math.max(
+            1,
+            Math.round(cropRect.width)
+        );
 
-
-        const activeFrameData =
-            prepared.activeFrameData;
-
-
-        /* ----------------------------------------------------
-           DIMENSIONI
-           ---------------------------------------------------- */
-
-        const outputWidth =
-            Math.max(
-                1,
-                Math.round(
-                    cropRect.width
-                )
-            );
-
-
-        const outputHeight =
-            Math.max(
-                1,
-                Math.round(
-                    cropRect.height
-                )
-            );
-
-
-        /* ----------------------------------------------------
-           DELAY BASE + VELOCITÀ
-           ---------------------------------------------------- */
+        const outputHeight = Math.max(
+            1,
+            Math.round(cropRect.height)
+        );
 
         const baseDelay =
-            calculateBaseDelay(
-                activeFrameData
-            );
+            calculateBaseDelay(activeFrameData);
 
+        const effectiveDelay = Math.max(
+            10,
+            Math.round(baseDelay / speedMultiplier)
+        );
 
-        const effectiveDelay =
-            Math.max(
-                10,
-                Math.round(
-                    baseDelay / speedMultiplier
-                )
-            );
-
-
-        /* ----------------------------------------------------
-           QUALITÀ / PESO
-           ---------------------------------------------------- */
-
-        let sampleInterval =
-            exportQualityInput
-                ? parseInt(exportQualityInput.value, 10)
-                : 10;
+        let sampleInterval = exportQualityInput
+            ? parseInt(exportQualityInput.value, 10)
+            : 10;
 
         if (
             !Number.isFinite(sampleInterval) ||
             sampleInterval < 1
         ) {
-
             sampleInterval = 10;
         }
-
-
-        /* ----------------------------------------------------
-           MANTENIMENTO DEL NUMERO ORIGINALE DI FRAME
-           ----------------------------------------------------
-
-           NON duplichiamo fisicamente i frame in base
-           al loro delay.
-
-           images rimane un elemento per ogni frame incluso
-           nella sequenza di export (ping-pong compreso).
-           ---------------------------------------------------- */
-
-
-        /* ----------------------------------------------------
-           STATO
-           ---------------------------------------------------- */
 
         if (exportStatus) {
 
             exportStatus.textContent =
-                `Codifica di ${images.length} immagini...`;
+                `Encoding ${images.length} images...`;
         }
-
-
-        /* ====================================================
-           GIFSHOT
-           ==================================================== */
 
         const options = {
 
             images: images,
 
-            gifWidth:
-                outputWidth,
+            gifWidth: outputWidth,
+            gifHeight: outputHeight,
 
-            gifHeight:
-                outputHeight,
+            interval: effectiveDelay / 1000,
 
-            interval:
-                effectiveDelay / 1000,
+            numFrames: images.length,
 
-            numFrames:
-                images.length,
+            sampleInterval: sampleInterval,
 
-            sampleInterval:
-                sampleInterval,
+            numWorkers: 2,
 
-            numWorkers:
-                2,
+            progressCallback: function (progress) {
 
-            progressCallback:
-                function (progress) {
+                const percentage = Math.round(progress * 100);
 
-                    const percentage =
-                        Math.round(
-                            progress * 100
-                        );
+                if (exportStatus) {
 
-
-                    if (exportStatus) {
-
-                        exportStatus.textContent =
-                            `Codifica GIF: ${percentage}%`;
-                    }
+                    exportStatus.textContent =
+                        `Encoding GIF: ${percentage}%`;
                 }
+            }
         };
-
 
         await new Promise(
             function (resolve, reject) {
 
-                gifshot.createGIF(
-                    options,
-                    function (result) {
+                try {
 
-                        if (
-                            result.error
-                        ) {
+                    gifshot.createGIF(
+                        options,
+                        function (result) {
 
-                            reject(
-                                new Error(
-                                    result.errorMsg ||
-                                    "Errore restituito da gifshot."
-                                )
-                            );
+                            if (result.error) {
 
-                            return;
-                        }
-
-
-                        if (
-                            !result.image
-                        ) {
-
-                            reject(
-                                new Error(
-                                    "gifshot non ha prodotto la GIF."
-                                )
-                            );
-
-                            return;
-                        }
-
-
-                        currentExportData =
-                            result.image;
-
-
-                        /* ------------------------------------
-                           Preview
-                           ------------------------------------ */
-
-                        if (exportPreview) {
-
-                            exportPreview.src =
-                                result.image;
-
-                            exportPreview.style.display =
-                                "block";
-                        }
-
-
-                        if (exportStatus) {
-
-                            exportStatus.textContent =
-                                "GIF creata correttamente.";
-                        }
-
-
-                        /* ------------------------------------
-                           Riepilogo: n. fotogrammi + peso
-                           ------------------------------------ */
-
-                        if (exportSummary) {
-
-                            const sizeBytes =
-                                getDataUrlSizeBytes(
-                                    result.image
+                                reject(
+                                    new Error(
+                                        result.errorMsg ||
+                                        "Error returned by gifshot."
+                                    )
                                 );
 
-                            const sizeMB =
-                                (sizeBytes / (1024 * 1024))
-                                    .toFixed(2);
+                                return;
+                            }
 
-                            exportSummary.textContent =
-                                `${images.length} fotogrammi esportati` +
-                                (usePingPong
-                                    ? ` (ping-pong incluso)`
-                                    : ``) +
-                                ` · ${sizeMB} MB`;
+                            if (!result.image) {
+
+                                reject(
+                                    new Error(
+                                        "gifshot did not produce a GIF."
+                                    )
+                                );
+
+                                return;
+                            }
+
+                            currentExportData = result.image;
+
+                            if (exportPreview) {
+
+                                exportPreview.src = result.image;
+
+                                exportPreview.style.display = "block";
+                            }
+
+                            if (exportStatus) {
+
+                                exportStatus.textContent =
+                                    "GIF created successfully.";
+                            }
+
+                            if (exportSummary) {
+
+                                const sizeBytes =
+                                    getDataUrlSizeBytes(result.image);
+
+                                const sizeMB = (
+                                    sizeBytes / (1024 * 1024)
+                                ).toFixed(2);
+
+                                exportSummary.textContent =
+                                    `${images.length} frames exported` +
+                                    (usePingPong
+                                        ? ` (ping-pong included)`
+                                        : ``) +
+                                    ` · ${sizeMB} MB`;
+                            }
+
+                            createDownloadButton(result.image);
+
+                            resolve();
                         }
+                    );
+                }
+                catch (innerError) {
 
-
-                        createDownloadButton(
-                            result.image
-                        );
-
-
-                        resolve();
-                    }
-                );
+                    reject(innerError);
+                }
             }
         );
     }
-
-
     catch (error) {
 
-        console.error(
-            "Errore esportazione GIF:",
-            error
-        );
-
+        console.error("GIF export error:", error);
 
         if (exportStatus) {
 
-            exportStatus.textContent =
-                "Errore durante la creazione della GIF.";
+            exportStatus.textContent = "";
         }
 
-
-        alert(
-            "Errore durante la creazione della GIF.\n\n" +
-            error.message
+        showErrorBox(
+            "export-error-box",
+            "export-error-message",
+            "export-error-technical",
+            "Could not create the GIF. This often happens " +
+            "with very large GIFs or when memory is low.",
+            error
         );
     }
-
-
     finally {
 
         if (exportButton) {
 
-            exportButton.disabled =
-                false;
+            exportButton.disabled = false;
 
-            exportButton.textContent =
-                "Crea nuova GIF";
+            exportButton.textContent = "Create new GIF";
         }
     }
 }
@@ -4211,59 +3678,29 @@ async function exportGif() {
    PULSANTE DOWNLOAD
    ============================================================ */
 
-function createDownloadButton(
-    dataUrl
-) {
+function createDownloadButton(dataUrl) {
 
-    const exportArea =
-        document.querySelector(
-            ".export-area"
-        );
-
+    const exportArea = document.querySelector(".export-area");
 
     if (!exportArea) {
 
-        console.warn(
-            "Elemento .export-area non trovato."
-        );
+        console.warn(".export-area not found.");
 
         return;
     }
 
-
-    /* Rimuove eventuale vecchio pulsante */
-
-    const oldButton =
-        $("download-gif");
-
+    const oldButton = $("download-gif");
 
     if (oldButton) {
-
         oldButton.remove();
     }
 
+    const button = document.createElement("button");
 
-    const button =
-        document.createElement(
-            "button"
-        );
-
-
-    button.id =
-        "download-gif";
-
-
-    button.className =
-        "primary";
-
-
-    button.type =
-        "button";
-
-
-    button.textContent =
-        "⬇ Scarica GIF";
-
+    button.id = "download-gif";
+    button.className = "primary";
+    button.type = "button";
+    button.textContent = "⬇ Download GIF";
 
     button.addEventListener(
         "click",
@@ -4276,10 +3713,7 @@ function createDownloadButton(
         }
     );
 
-
-    exportArea.appendChild(
-        button
-    );
+    exportArea.appendChild(button);
 }
 
 
@@ -4287,72 +3721,54 @@ function createDownloadButton(
    DOWNLOAD
    ============================================================ */
 
-function downloadDataUrl(
-    dataUrl,
-    filename
-) {
+function downloadDataUrl(dataUrl, filename) {
 
-    const link =
-        document.createElement(
-            "a"
-        );
+    const link = document.createElement("a");
 
+    link.href = dataUrl;
 
-    link.href =
-        dataUrl;
+    link.download = filename;
 
-
-    link.download =
-        filename;
-
-
-    document.body.appendChild(
-        link
-    );
-
+    document.body.appendChild(link);
 
     link.click();
-
 
     link.remove();
 }
 
 
 /* ============================================================
-   INFORMAZIONI DI DEBUG
+   INIZIALIZZAZIONE
    ============================================================ */
 
-console.log(
-    "========================================"
-);
+updateTabStates();
+
+resizeAnimPreviewCanvas();
 
 
-console.log(
-    "GIF Frame Master"
-);
+/* ============================================================
+   LOG DI DEBUG
+   ============================================================ */
 
+console.log("========================================");
 
-console.log(
-    "app.js caricato correttamente"
-);
+console.log("GIF Frame Master");
 
+console.log("app.js loaded successfully");
 
 console.log(
     "gifuct-js:",
-    getGifuct()
-        ? "OK"
-        : "NON TROVATO"
+    getGifuct() ? "OK" : "NOT FOUND"
 );
-
 
 console.log(
     "gifshot:",
-    getGifshot()
-        ? "OK"
-        : "NON TROVATO"
+    getGifshot() ? "OK" : "NOT FOUND"
 );
 
+console.log("========================================");
 
-console.log(
-    "========================================"
-);
+
+/* ============================================================
+   FINE APP.JS
+   ============================================================ */
