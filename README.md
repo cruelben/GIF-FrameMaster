@@ -1,191 +1,211 @@
-GIF Frame Master
-An advanced, browser-based GIF editor — frame-by-frame management, visual crop, resize, multi-GIF merge, and Gifsicle-powered optimization.
+# GIF Frame Master
 
-https://img.shields.io/badge/License-MIT-yellow.svg
-https://img.shields.io/badge/Manifest-V3-blue.svg
-https://img.shields.io/badge/dependencies-none-brightgreen.svg
+> An advanced, browser-based GIF editor — frame-by-frame management, visual crop, resize, multi-GIF merge, and Gifsicle-powered optimization.
 
-✨ Features
-Frame management — grid of thumbnails, multi-selection, drag & drop reorder, undo
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Manifest V3](https://img.shields.io/badge/Manifest-V3-blue.svg)](https://developer.chrome.com/docs/extensions/mv3/)
+[![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)]()
 
-Duplicate detection — configurable threshold to find and mark similar frames
+---
 
-Batch operations — remove 1 every N frames, invert selection, keep/remove selected
+## ✨ Features
 
-Animated preview — playback of the current active frames with their real delays
+- **Frame management** — grid of thumbnails, multi-selection, drag & drop reorder, undo
+- **Duplicate detection** — configurable threshold to find and mark similar frames
+- **Batch operations** — remove 1 every N frames, invert selection, keep/remove selected
+- **Animated preview** — playback of the current active frames with their real delays
+- **Crop** — visual rectangle with draggable handles and corner resize
+- **Resize** — editable width/height, aspect ratio lock, quick presets (100/75/50/25%), scale slider
+- **Multi-GIF merge** — append a second GIF to the sequence with position/zoom/background controls
+- **Export with Gifsicle** — real GIF optimization via WebAssembly (dirty rectangle, per-frame palette, LZW tuning)
+- **Optimization presets** — Lossless / Light / Balanced / Aggressive / Extreme / Custom
+- **Colors control** — palette size 256 / 128 / 64 / 32
+- **Optional dithering**
+- **Comparison table** — Original vs Edited vs Optimized (size, dimensions, frames, duration)
+- **Smart filename** — the exported file keeps the original name with `_edited` suffix
+- **Native save dialog** — uses `showSaveFilePicker()` when available, fallback to standard download
+- **Robust error reporting** — detailed error boxes with expandable technical details
 
-Crop — visual rectangle with draggable handles and corner resize
+---
 
-Resize — editable width/height, aspect ratio lock, quick presets (100/75/50/25%), scale slider
+## 🚀 Quick Start
 
-Multi-GIF merge — append a second GIF to the sequence with position/zoom/background controls
+### Option 1 — Install as a Chrome extension (recommended)
 
-Export with Gifsicle — real GIF optimization via WebAssembly (dirty rectangle, per-frame palette, LZW tuning)
-
-Optimization presets — Lossless / Light / Balanced / Aggressive / Extreme / Custom
-
-Colors control — palette size 256 / 128 / 64 / 32
-
-Optional dithering
-
-Comparison table — Original vs Edited vs Optimized (size, dimensions, frames, duration)
-
-Smart filename — the exported file keeps the original name with _edited suffix
-
-Native save dialog — uses showSaveFilePicker() when available, fallback to standard download
-
-Robust error reporting — detailed error boxes with expandable technical details
-
-🚀 Quick Start
-Option 1 — Install as a Chrome extension (recommended)
-Download or clone this repository:
-
-text
+1. Download or clone this repository:
 git clone https://github.com/cruelben/gif-frame-master.git
 cd gif-frame-master
-Open Chrome and go to chrome://extensions
-
-Enable Developer mode (top-right toggle)
-
-Click Load unpacked and select the folder
-
-Click the extension icon to open GIF Frame Master in a new tab
-
-Option 2 — Run locally from index.html
-Because of browser security restrictions on file:// URLs, WebAssembly and Web Workers may be blocked when opening index.html directly. To run the tool at full capacity, serve it through a local HTTP server:
 
 text
-# Using Python
+2. Open Chrome and go to `chrome://extensions`
+3. Enable **Developer mode** (top-right toggle)
+4. Click **Load unpacked** and select the folder
+5. Click the extension icon to open GIF Frame Master in a new tab
+
+### Option 2 — Run locally from `index.html`
+
+Because of browser security restrictions on `file://` URLs, **WebAssembly and Web Workers may be blocked** when opening `index.html` directly. To run the tool at full capacity, serve it through a local HTTP server:
+Using Python
 python -m http.server 8000
 
-# Or using Node.js
+Or using Node.js
 npx serve
-Then open http://localhost:8000 in your browser.
 
-Note: the Gifsicle WASM optimizer requires an HTTP context (http:// or chrome-extension://). If you open index.html via file://, the core editing features will still work, but Gifsicle optimization may be disabled.
+text
 
-🧭 Workflow
+Then open `http://localhost:8000` in your browser.
+
+**Note:** the Gifsicle WASM optimizer requires an HTTP context (`http://` or `chrome-extension://`). If you open `index.html` via `file://`, the core editing features will still work, but Gifsicle optimization may be disabled.
+
+---
+
+## 🧭 Workflow
+
 The app is organized into 6 tabs:
 
-Tab	Purpose
-1. Load	Load the main GIF, or append a second one (queue)
-2. Frames	Manage frames: select, reorder, remove, dedupe, preview
-3. Queue	Position the second GIF inside the main canvas
-4. Crop	Visually crop the rectangle
-5. Resize	Scale to a new output size (with aspect-ratio lock)
-6. Export	Configure optimization and generate the final GIF
-⚙️ Optimization (Gifsicle)
-Under the hood, the raw GIF generated by gifshot is passed through gifsicle-wasm-browser — a WebAssembly port of the legendary Gifsicle CLI tool.
+| Tab | Purpose |
+|-----|---------|
+| **1. Load** | Load the main GIF, or append a second one (queue) |
+| **2. Frames** | Manage frames: select, reorder, remove, dedupe, preview |
+| **3. Queue** | Position the second GIF inside the main canvas |
+| **4. Crop** | Visually crop the rectangle |
+| **5. Resize** | Scale to a new output size (with aspect-ratio lock) |
+| **6. Export** | Configure optimization and generate the final GIF |
 
-Presets
-Level	Lossy	Colors	Dither	Notes
-Lossless	—	256	off	Dirty rectangle only, zero quality loss
-Light	20	256	off	Minimal loss, barely visible
-Balanced	40	256	off	Good compromise
-Aggressive	80	256	off	Smaller files, slight artifacts
-Extreme	80	128	off	Smallest files, visible quality loss
-The Colors and Dither controls remain editable at any time, overriding the preset values.
+---
 
-What Gifsicle actually does
-Dirty rectangle compression — stores only the pixels that change between frames
+## ⚙️ Optimization (Gifsicle)
 
-Per-frame palette optimization — picks the best palette for each frame
+Under the hood, the raw GIF generated by [gifshot](https://github.com/yahoo/gifshot) is passed through [gifsicle-wasm-browser](https://github.com/renzhezhilu/gifsicle-wasm-browser) — a WebAssembly port of the legendary [Gifsicle](https://www.lcdf.org/gifsicle/) CLI tool.
 
-LZW tuning — better dictionary construction
+### Presets
 
-Lossy quantization — merges similar colors to shrink the palette (controlled by --lossy)
+| Level | Lossy | Colors | Dither | Notes |
+|-------|-------|--------|--------|-------|
+| Lossless | — | 256 | off | Dirty rectangle only, zero quality loss |
+| Light | 20 | 256 | off | Minimal loss, barely visible |
+| Balanced | 40 | 256 | off | Good compromise |
+| Aggressive | 80 | 256 | off | Smaller files, slight artifacts |
+| Extreme | 80 | 128 | off | Smallest files, visible quality loss |
 
-Color reduction — limits the palette size (controlled by --colors)
+The **Colors** and **Dither** controls remain editable at any time, overriding the preset values.
 
-Dithering — optional, trades file size for smoother gradients
+### What Gifsicle actually does
 
-On a typical photographic GIF already optimized by external tools, this can reduce file size by 40–60% compared to the raw encoder output.
+- **Dirty rectangle compression** — stores only the pixels that change between frames
+- **Per-frame palette optimization** — picks the best palette for each frame
+- **LZW tuning** — better dictionary construction
+- **Lossy quantization** — merges similar colors to shrink the palette (controlled by `--lossy`)
+- **Color reduction** — limits the palette size (controlled by `--colors`)
+- **Dithering** — optional, trades file size for smoother gradients
 
-📦 Dependencies (all bundled locally)
-Library	Purpose	File
-gifuct-js	Parse and decompress GIF frames	gifuct-js.min.js
-gifshot	Encode frames back to GIF	gifshot.min.js
-gifsicle-wasm-browser	Optimize the resulting GIF	gifsicle.min.js + gifsicle.wasm + src/worker.js
-⚠️ Important: gifsicle.min.js has been patched to expose the library globally (window.gifsicle) instead of using the ES6 export default syntax, so it can be loaded with a plain <script> tag inside a Manifest V3 extension.
+On a typical photographic GIF already optimized by external tools, this can reduce file size by **40–60%** compared to the raw encoder output.
 
-📁 Project Structure
-text
+---
+
+## 📦 Dependencies (all bundled locally)
+
+| Library | Purpose | File |
+|---------|---------|------|
+| [gifuct-js](https://github.com/matt-way/gifuct-js) | Parse and decompress GIF frames | `gifuct-js.min.js` |
+| [gifshot](https://github.com/yahoo/gifshot) | Encode frames back to GIF | `gifshot.min.js` |
+| [gifsicle-wasm-browser](https://github.com/renzhezhilu/gifsicle-wasm-browser) | Optimize the resulting GIF | `gifsicle.min.js` + `gifsicle.wasm` + `src/worker.js` |
+
+⚠️ **Important:** `gifsicle.min.js` has been patched to expose the library globally (`window.gifsicle`) instead of using the ES6 `export default` syntax, so it can be loaded with a plain `<script>` tag inside a Manifest V3 extension.
+
+---
+
+## 📁 Project Structure
 gif-frame-master/
-├── manifest.json           Chrome MV3 manifest
-├── background.js           Service worker (opens index.html on icon click)
-├── index.html              Main UI (6 tabs)
-├── app.js                  All application logic
-├── icon.png                Extension icon
-├── gifuct-js.min.js        GIF decoder
-├── gifshot.min.js          GIF encoder
-├── gifsicle.min.js         Gifsicle WASM wrapper (patched)
-├── gifsicle.wasm           Gifsicle binary
+├── manifest.json Chrome MV3 manifest
+├── background.js Service worker (opens index.html on icon click)
+├── index.html Main UI (6 tabs)
+├── app.js All application logic
+├── icon.png Extension icon
+├── gifuct-js.min.js GIF decoder
+├── gifshot.min.js GIF encoder
+├── gifsicle.min.js Gifsicle WASM wrapper (patched)
+├── gifsicle.wasm Gifsicle binary
 ├── src/
-│   └── worker.js           Web Worker used by gifsicle
+│ └── worker.js Web Worker used by gifsicle
 └── README.md
-🖥️ Browser Support
-Browser	Extension	Local (http://)	Local (file://)
-Chrome / Edge / Brave	✅ Full	✅ Full	⚠️ Gifsicle may not load
-Firefox	⚠️ Requires MV2/MV3 adaptations	✅ Full	⚠️ Workers may be blocked
-Safari	❌	⚠️ Partial	❌
+
+text
+
+---
+
+## 🖥️ Browser Support
+
+| Browser | Extension | Local (`http://`) | Local (`file://`) |
+|---------|-----------|-------------------|-------------------|
+| Chrome / Edge / Brave | ✅ Full | ✅ Full | ⚠️ Gifsicle may not load |
+| Firefox | ⚠️ Requires MV2/MV3 adaptations | ✅ Full | ⚠️ Workers may be blocked |
+| Safari | ❌ | ⚠️ Partial | ❌ |
+
 For best results, use a Chromium-based browser.
 
-🧪 Tested Workflow
+---
+
+## 🧪 Tested Workflow
+
 A typical edit session:
 
-Load the source GIF (e.g. animation.gif, 640×360, 2.02 MB)
+1. **Load** the source GIF (e.g. `animation.gif`, 640×360, 2.02 MB)
+2. **Remove duplicate frames** using the dedupe tool (threshold 1.5%)
+3. **Crop** to the interesting region
+4. **Resize** to 50% of the cropped size
+5. **Export** with `Extreme` preset (lossy 80, colors 128)
+6. The comparison table shows the size reduction (e.g. **-73%**)
+7. Download as `animation_edited.gif`
 
-Remove duplicate frames using the dedupe tool (threshold 1.5%)
+---
 
-Crop to the interesting region
+## 🛠️ Development Notes
 
-Resize to 50% of the cropped size
+- The UI is a **single-page HTML** app with no build step.
+- All logic lives in `app.js` (~3000 lines), organized into sections with clear comments.
+- The tab system is powered by `switchTab(name)` and `updateTabStates()`.
+- The whole app runs client-side. **No server, no tracking, no uploads.**
 
-Export with Extreme preset (lossy 80, colors 128)
+### Regenerate the patched `gifsicle.min.js`
 
-The comparison table shows the size reduction (e.g. -73%)
-
-Download as animation_edited.gif
-
-🛠️ Development Notes
-The UI is a single-page HTML app with no build step.
-
-All logic lives in app.js (~3000 lines), organized into sections with clear comments.
-
-The tab system is powered by switchTab(name) and updateTabStates().
-
-The whole app runs client-side. No server, no tracking, no uploads.
-
-Regenerate the patched gifsicle.min.js
 If you update the underlying library, you need to re-apply the patch:
+export default gifsicle;
+
+window.gifsicle = gifsicle;
 
 text
-- export default gifsicle;
-+ window.gifsicle = gifsicle;
-This is the only change applied to the original file.
 
-🐛 Known Limitations
-Gifshot is not an optimizer. It rebuilds the GIF from scratch, so if you don't touch anything and export without Gifsicle, the output will likely be larger than the original.
+This is the **only** change applied to the original file.
 
--O2 and -O3 are not exposed — they are extremely slow on large GIFs (>10 MB) with negligible gains over -O1.
+---
 
-Web Workers may be blocked in Firefox when running from file://.
+## 🐛 Known Limitations
 
-Maximum output size is capped at 4000×4000 px to avoid browser freezes.
+- **Gifshot is not an optimizer.** It rebuilds the GIF from scratch, so if you don't touch anything and export without Gifsicle, the output will likely be **larger** than the original.
+- **`-O2` and `-O3` are not exposed** — they are extremely slow on large GIFs (>10 MB) with negligible gains over `-O1`.
+- **Web Workers may be blocked** in Firefox when running from `file://`.
+- **Maximum output size** is capped at 4000×4000 px to avoid browser freezes.
 
-📜 License
-MIT — see LICENSE for details.
+---
 
-👤 Author
-Bruno (@cruelben)
+## 📜 License
 
-Surviving Cobol programmer (yes, we still exist!), cryptography systems, and tech enthusiast.
+MIT — see [LICENSE](LICENSE) for details.
 
-⭐ Acknowledgments
-Gifsicle by Eddie Kohler
+---
 
-gifsicle-wasm-browser by renzhezhilu
+## 👤 Author
 
-gifuct-js by Matt Way
+**Bruno** ([@cruelben](https://cruelben.github.io/))
 
-gifshot by Yahoo
+> Surviving Cobol programmer (yes, we still exist!), cryptography systems, and tech enthusiast.
+
+---
+
+## ⭐ Acknowledgments
+
+- [Gifsicle](https://www.lcdf.org/gifsicle/) by Eddie Kohler
+- [gifsicle-wasm-browser](https://github.com/renzhezhilu/gifsicle-wasm-browser) by renzhezhilu
+- [gifuct-js](https://github.com/matt-way/gifuct-js) by Matt Way
+- [gifshot](https://github.com/yahoo/gifshot) by Yahoo
