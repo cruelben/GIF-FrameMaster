@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "GIF Frame Master",
-  "version": "1.1",
-  "description": "Advanced GIF editor: multi-frame removal, visual crop, frame reordering, GIF appending and custom export.",
+  "version": "1.2",
+  "description": "Advanced GIF editor: frame management, crop, resize, multi-GIF merge, and Gifsicle-powered optimization.",
   "action": {
     "default_title": "Open GIF Frame Master",
     "default_icon": {
@@ -24,5 +24,8 @@
   "permissions": [
     "storage",
     "activeTab"
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
 }

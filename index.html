@@ -6,7 +6,7 @@
     <meta name="viewport"
           content="width=device-width, initial-scale=1.0">
 
-        <title>GIF Frame Master</title>
+    <title>GIF Frame Master</title>
 
     <link rel="icon" type="image/png" href="icon.png">
 
@@ -909,7 +909,377 @@
         }
 
         /* =====================================================
+           RESIZE
+        ===================================================== */
+
+        .resize-layout {
+            display: grid;
+
+            grid-template-columns:
+                minmax(400px, 1fr)
+                280px;
+
+            gap: 20px;
+        }
+
+        .resize-preview {
+            min-height: 450px;
+
+            background: #0b1120;
+
+            border: 1px solid #374151;
+            border-radius: 10px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            overflow: hidden;
+
+            position: relative;
+        }
+
+        #resize-preview-canvas {
+            display: block;
+
+            max-width: 100%;
+            max-height: 500px;
+
+            background:
+                repeating-conic-gradient(
+                    #d1d5db 0% 25%,
+                    #ffffff 0% 50%
+                )
+                50% / 16px 16px;
+        }
+
+        .resize-controls {
+            background: #111827;
+
+            border: 1px solid #374151;
+            border-radius: 10px;
+
+            padding: 15px;
+        }
+
+        .resize-input-row {
+            display: grid;
+
+            grid-template-columns: 1fr 1fr;
+
+            gap: 10px;
+
+            margin-bottom: 12px;
+        }
+
+        .resize-input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .resize-input-group label {
+            color: #9ca3af;
+            font-size: 11px;
+        }
+
+        .resize-input-group input[type="number"] {
+            width: 100%;
+
+            padding: 8px 10px;
+
+            border: 1px solid #4b5563;
+            border-radius: 6px;
+
+            background: #1f2937;
+            color: #e5e7eb;
+
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .resize-input-group input[type="number"]:focus {
+            outline: none;
+            border-color: #60a5fa;
+        }
+
+        .resize-input-group input.input-warning {
+            border-color: #f59e0b;
+        }
+
+        .lock-row {
+            display: flex;
+            align-items: center;
+
+            gap: 8px;
+
+            margin: 12px 0;
+
+            color: #9ca3af;
+            font-size: 13px;
+
+            cursor: pointer;
+
+            user-select: none;
+        }
+
+        .lock-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+
+            accent-color: #2563eb;
+
+            cursor: pointer;
+        }
+
+        .lock-icon {
+            font-size: 15px;
+        }
+
+        .preset-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+
+            margin-bottom: 12px;
+        }
+
+        .preset-row button {
+            flex: 1;
+
+            min-width: 55px;
+
+            padding: 7px 6px;
+
+            font-size: 12px;
+        }
+
+        .preset-row button.active {
+            background: #2563eb;
+            color: #ffffff;
+        }
+
+        .scale-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+
+            margin-bottom: 12px;
+
+            color: #9ca3af;
+            font-size: 13px;
+        }
+
+        .scale-row input[type="range"] {
+            flex: 1;
+            accent-color: #2563eb;
+        }
+
+        .scale-value {
+            display: inline-block;
+            min-width: 48px;
+
+            color: #60a5fa;
+            font-weight: 600;
+
+            text-align: right;
+        }
+
+        .resize-info {
+            padding: 8px 12px;
+
+            background: #1f2937;
+
+            border: 1px solid #374151;
+            border-radius: 6px;
+
+            color: #9ca3af;
+            font-size: 12px;
+
+            margin-bottom: 12px;
+        }
+
+        .resize-info strong {
+            color: #e5e7eb;
+        }
+
+        .resize-warning {
+            display: none;
+
+            margin-top: 10px;
+
+            padding: 8px 12px;
+
+            background: #451a03;
+
+            border: 1px solid #b45309;
+            border-radius: 6px;
+
+            color: #fbbf24;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .resize-warning.visible {
+            display: block;
+        }
+
+        /* =====================================================
            EXPORT
+        ===================================================== */
+
+        .export-source {
+            margin-bottom: 15px;
+
+            padding: 8px 12px;
+
+            background: #111827;
+
+            border: 1px solid #374151;
+            border-radius: 6px;
+
+            color: #9ca3af;
+            font-size: 13px;
+        }
+
+        .export-source strong {
+            color: #60a5fa;
+            font-weight: 600;
+        }
+
+        /* =====================================================
+           OPTIMIZE PANEL
+        ===================================================== */
+
+        .optimize-panel {
+            margin-bottom: 15px;
+
+            padding: 14px 16px;
+
+            background: #0b1120;
+
+            border: 1px solid #374151;
+            border-radius: 10px;
+        }
+
+        .optimize-title {
+            font-size: 14px;
+            font-weight: 600;
+
+            color: #e5e7eb;
+
+            margin-bottom: 12px;
+        }
+
+        .optimize-row {
+            display: flex;
+            align-items: center;
+
+            gap: 8px;
+
+            color: #e5e7eb;
+            font-size: 13px;
+
+            cursor: pointer;
+
+            user-select: none;
+
+            margin-bottom: 10px;
+        }
+
+        .optimize-row input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+
+            accent-color: #2563eb;
+
+            cursor: pointer;
+        }
+
+        .optimize-fields {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+
+            gap: 20px;
+
+            padding: 10px 0;
+
+            border-top: 1px solid #1f2937;
+
+            margin-top: 6px;
+        }
+
+        .optimize-fields.disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .optimize-field {
+            display: flex;
+            align-items: center;
+
+            gap: 8px;
+
+            color: #9ca3af;
+            font-size: 13px;
+        }
+
+        .optimize-field select {
+            padding: 6px 10px;
+
+            border: 1px solid #4b5563;
+            border-radius: 6px;
+
+            background: #1f2937;
+            color: #e5e7eb;
+
+            font-size: 13px;
+
+            cursor: pointer;
+        }
+
+        .optimize-field select:focus {
+            outline: none;
+            border-color: #60a5fa;
+        }
+
+        .optimize-field input[type="number"] {
+            width: 70px;
+
+            padding: 6px 8px;
+
+            border: 1px solid #4b5563;
+            border-radius: 6px;
+
+            background: #1f2937;
+            color: #e5e7eb;
+
+            font-size: 13px;
+        }
+
+        .optimize-field input[type="number"]:focus {
+            outline: none;
+            border-color: #60a5fa;
+        }
+
+        .optimize-hint {
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .optimize-note {
+            margin-top: 10px;
+
+            color: #9ca3af;
+
+            font-size: 11px;
+
+            line-height: 1.5;
+        }
+
+        /* =====================================================
+           EXPORT AREA
         ===================================================== */
 
         .export-area {
@@ -947,28 +1317,120 @@
             accent-color: #2563eb;
         }
 
-        #export-summary {
-            margin-top: 10px;
-            color: #9ca3af;
-            font-size: 13px;
-        }
+        /* =====================================================
+           EXPORT COMPARISON TABLE
+        ===================================================== */
 
-        #export-preview {
+        .export-comparison {
             display: none;
 
             margin-top: 20px;
 
-            max-width: 100%;
-
             border: 1px solid #374151;
-            border-radius: 8px;
+            border-radius: 10px;
 
-            background:
-                repeating-conic-gradient(
-                    #d1d5db 0% 25%,
-                    #ffffff 0% 50%
-                )
-                50% / 16px 16px;
+            overflow: hidden;
+
+            background: #0b1120;
+        }
+
+        .export-comparison.visible {
+            display: block;
+        }
+
+        .export-comparison-title {
+            padding: 12px 16px;
+
+            background: #1f2937;
+
+            border-bottom: 1px solid #374151;
+
+            font-size: 14px;
+            font-weight: 600;
+
+            color: #e5e7eb;
+        }
+
+        .export-comparison table {
+            width: 100%;
+
+            border-collapse: collapse;
+
+            font-size: 13px;
+        }
+
+        .export-comparison th,
+        .export-comparison td {
+            padding: 10px 16px;
+
+            text-align: left;
+
+            border-bottom: 1px solid #1f2937;
+        }
+
+        .export-comparison th {
+            color: #9ca3af;
+
+            font-weight: 600;
+
+            font-size: 12px;
+
+            text-transform: uppercase;
+
+            letter-spacing: 0.5px;
+        }
+
+        .export-comparison td {
+            color: #e5e7eb;
+        }
+
+        .export-comparison td.metric-name {
+            color: #9ca3af;
+            font-weight: normal;
+        }
+
+        .export-comparison td.original-value {
+            color: #9ca3af;
+        }
+
+        .export-comparison td.edited-value {
+            color: #60a5fa;
+            font-weight: 600;
+        }
+
+        .export-comparison td.optimized-value {
+            color: #4ade80;
+            font-weight: 600;
+        }
+
+        .export-comparison-diff {
+            padding: 12px 16px;
+
+            background: #111827;
+
+            border-top: 1px solid #374151;
+
+            font-size: 13px;
+
+            line-height: 1.8;
+
+            color: #9ca3af;
+        }
+
+        .export-comparison-diff .diff-line {
+            display: block;
+        }
+
+        .export-comparison-diff .diff-positive {
+            color: #4ade80;
+        }
+
+        .export-comparison-diff .diff-negative {
+            color: #f87171;
+        }
+
+        .export-comparison-diff .diff-neutral {
+            color: #9ca3af;
         }
 
         #export-status {
@@ -1005,12 +1467,14 @@
         @media (max-width: 900px) {
 
             .crop-layout,
-            .import-layout {
+            .import-layout,
+            .resize-layout {
                 grid-template-columns: 1fr;
             }
 
             .crop-preview,
-            .import-preview-outer {
+            .import-preview-outer,
+            .resize-preview {
                 min-height: 350px;
             }
 
@@ -1050,6 +1514,12 @@
 
             .tab-nav button {
                 min-width: auto;
+                padding: 8px 10px;
+                font-size: 12px;
+            }
+
+            .export-comparison th,
+            .export-comparison td {
                 padding: 8px 10px;
                 font-size: 12px;
             }
@@ -1152,11 +1622,30 @@
 
         <button
             class="tab-button"
+            data-tab="resize"
+            type="button"
+            disabled
+        >
+            5. Resize
+            <span
+                class="tab-counter"
+                id="tab-counter-resize"
+                style="display:none;"
+            ></span>
+            <span
+                class="tab-dot"
+                id="tab-dot-resize"
+                style="display:none;"
+            ></span>
+        </button>
+
+        <button
+            class="tab-button"
             data-tab="export"
             type="button"
             disabled
         >
-            5. Export
+            6. Export
         </button>
 
     </nav>
@@ -1262,9 +1751,6 @@
                     2. Frame management
                 </h2>
 
-
-                <!-- TOOLBAR -->
-
                 <div class="toolbar">
 
                     <button
@@ -1364,9 +1850,6 @@
 
                 </div>
 
-
-                <!-- ANIMATED PREVIEW -->
-
                 <div class="preview-anim">
 
                     <canvas id="preview-anim-canvas"></canvas>
@@ -1400,9 +1883,6 @@
                     </div>
 
                 </div>
-
-
-                <!-- INFO FRAME -->
 
                 <div class="frame-info">
 
@@ -1439,9 +1919,6 @@
                     </span>
 
                 </div>
-
-
-                <!-- GRIGLIA -->
 
                 <div id="frames-grid"></div>
 
@@ -1824,6 +2301,181 @@
                 <button
                     class="primary"
                     type="button"
+                    data-next="resize"
+                >
+                    Next →
+                </button>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             TAB 5: RESIZE
+        ================================================== -->
+
+        <section
+            class="tab-panel"
+            data-panel="resize"
+        >
+
+            <div class="card" id="resize-workspace">
+
+                <h2 class="card-title">
+                    5. Resize
+                </h2>
+
+                <div class="resize-layout">
+
+                    <div class="resize-preview">
+
+                        <canvas id="resize-preview-canvas"></canvas>
+
+                    </div>
+
+                    <div class="resize-controls">
+
+                        <div class="resize-info">
+                            Current size:
+                            <strong id="resize-current-size">-</strong>
+                        </div>
+
+                        <div class="resize-input-row">
+
+                            <div class="resize-input-group">
+                                <label for="resize-width">
+                                    Width (px)
+                                </label>
+                                <input
+                                    type="number"
+                                    id="resize-width"
+                                    min="1"
+                                    max="4000"
+                                    step="1"
+                                    value="0"
+                                >
+                            </div>
+
+                            <div class="resize-input-group">
+                                <label for="resize-height">
+                                    Height (px)
+                                </label>
+                                <input
+                                    type="number"
+                                    id="resize-height"
+                                    min="1"
+                                    max="4000"
+                                    step="1"
+                                    value="0"
+                                >
+                            </div>
+
+                        </div>
+
+                        <label class="lock-row" for="resize-lock">
+                            <input
+                                type="checkbox"
+                                id="resize-lock"
+                                checked
+                            >
+                            <span class="lock-icon">🔒</span>
+                            Lock aspect ratio
+                        </label>
+
+                        <div class="preset-row">
+                            <button
+                                type="button"
+                                data-preset="100"
+                            >
+                                100%
+                            </button>
+                            <button
+                                type="button"
+                                data-preset="75"
+                            >
+                                75%
+                            </button>
+                            <button
+                                type="button"
+                                data-preset="50"
+                            >
+                                50%
+                            </button>
+                            <button
+                                type="button"
+                                data-preset="25"
+                            >
+                                25%
+                            </button>
+                        </div>
+
+                        <div class="scale-row">
+
+                            <label for="resize-scale">
+                                Scale:
+                            </label>
+
+                            <input
+                                type="range"
+                                id="resize-scale"
+                                min="10"
+                                max="200"
+                                step="1"
+                                value="100"
+                            >
+
+                            <span
+                                class="scale-value"
+                                id="resize-scale-value"
+                            >
+                                100%
+                            </span>
+
+                        </div>
+
+                        <div class="resize-warning" id="resize-warning">
+                            ⚠️ Some values were clamped to the
+                            maximum of 4000 px per side.
+                        </div>
+
+                        <div class="crop-help">
+
+                            Modify Width and Height directly, or
+                            use presets and the slider as shortcuts.
+
+                            <br><br>
+
+                            With <strong>Lock aspect ratio</strong> on,
+                            changing one dimension automatically
+                            updates the other to keep the
+                            original proportions.
+
+                            <br><br>
+
+                            With the lock off, Width and Height
+                            are independent (may distort the image).
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+            <div class="tab-nav">
+
+                <button
+                    type="button"
+                    data-prev="crop"
+                >
+                    ← Back
+                </button>
+
+                <button
+                    class="primary"
+                    type="button"
                     data-next="export"
                 >
                     Next →
@@ -1835,7 +2487,7 @@
 
 
         <!-- =================================================
-             TAB 5: EXPORT
+             TAB 6: EXPORT
         ================================================== -->
 
         <section
@@ -1846,8 +2498,13 @@
             <div class="card" id="export-workspace">
 
                 <h2 class="card-title">
-                    5. Export GIF
+                    6. Export GIF
                 </h2>
+
+                <div class="export-source">
+                    Source file:
+                    <strong id="export-source-name">-</strong>
+                </div>
 
                 <div class="frame-info">
 
@@ -1906,6 +2563,161 @@
 
                 </div>
 
+                <!-- Gifsicle optimization panel -->
+
+                <div class="optimize-panel">
+
+                    <div class="optimize-title">
+                        ⚙️ Optimization (Gifsicle)
+                    </div>
+
+                    <label class="optimize-row" for="optimize-toggle">
+
+                        <input
+                            type="checkbox"
+                            id="optimize-toggle"
+                            checked
+                        >
+
+                        Optimize with Gifsicle
+                        <span style="color:#4ade80;">
+                            (recommended)
+                        </span>
+
+                    </label>
+
+                    <div
+                        class="optimize-fields"
+                        id="optimize-fields"
+                    >
+
+                        <div class="optimize-field">
+
+                            <label for="optimize-level">
+                                Level:
+                            </label>
+
+                            <select id="optimize-level">
+
+                                <option value="lossless">
+                                    Lossless (dirty rectangle only)
+                                </option>
+
+                                <option value="light">
+                                    Light (lossy 20)
+                                </option>
+
+                                <option value="balanced" selected>
+                                    Balanced (lossy 40)
+                                </option>
+
+                                <option value="aggressive">
+                                    Aggressive (lossy 80)
+                                </option>
+
+                                <option value="extreme">
+                                    Extreme (lossy 80 · 128 colors · dither)
+                                </option>
+
+                                <option value="custom">
+                                    Custom (use values below)
+                                </option>
+
+                            </select>
+
+                        </div>
+
+                        <div class="optimize-field">
+
+                            <label for="optimize-lossy">
+                                Lossy:
+                            </label>
+
+                            <input
+                                type="number"
+                                id="optimize-lossy"
+                                min="1"
+                                max="200"
+                                step="1"
+                                value="40"
+                            >
+
+                            <span class="optimize-hint">
+                                (1 = perfect · 200 = tiny)
+                            </span>
+
+                        </div>
+
+                        <div class="optimize-field">
+
+                            <label for="optimize-colors">
+                                Colors:
+                            </label>
+
+                            <select id="optimize-colors">
+
+                                <option value="256" selected>
+                                    256
+                                </option>
+
+                                <option value="128">
+                                    128
+                                </option>
+
+                                <option value="64">
+                                    64
+                                </option>
+
+                                <option value="32">
+                                    32
+                                </option>
+
+                            </select>
+
+                        </div>
+
+                        <div class="optimize-field">
+
+                            <label for="optimize-dither">
+
+                                <input
+                                    type="checkbox"
+                                    id="optimize-dither"
+                                >
+
+                                Dither
+                            </label>
+
+                        </div>
+
+                    </div>
+
+                    <div class="optimize-note">
+
+                        Gifsicle applies dirty-rectangle
+                        compression, per-frame palette
+                        optimization and LZW tuning — often
+                        reducing file size by 30–60% compared
+                        to the raw encoder output.
+
+                        <br><br>
+
+                        <strong>Colors</strong>: number of colors
+                        in the palette. 256 = max (GIF format
+                        limit). Lower = smaller file but more
+                        banding.
+
+                        <br>
+
+                        <strong>Dither</strong>: applies dithering
+                        to reduce visible banding at low color
+                        counts. Slightly larger file but smoother
+                        gradients.
+
+                    </div>
+
+                </div>
+
                 <div class="export-area">
 
                     <button
@@ -1920,8 +2732,6 @@
 
                 </div>
 
-                <div id="export-summary"></div>
-
                 <div class="error-box" id="export-error-box">
                     <div class="error-title">
                         Could not create the GIF
@@ -1931,6 +2741,79 @@
                         <summary>Technical details</summary>
                         <pre id="export-error-technical"></pre>
                     </details>
+                </div>
+
+                <!-- EXPORT COMPARISON TABLE -->
+
+                <div
+                    class="export-comparison"
+                    id="export-comparison"
+                >
+
+                    <div class="export-comparison-title">
+                        📊 Export result — Original vs Edited
+                    </div>
+
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Original</th>
+                                <th>Edited</th>
+                                <th>Optimized</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="metric-name">Frames</td>
+                                <td class="original-value" id="cmp-frames-orig">-</td>
+                                <td class="edited-value" id="cmp-frames-new">-</td>
+                                <td class="optimized-value" id="cmp-frames-opt">-</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-name">Dimensions</td>
+                                <td class="original-value" id="cmp-dims-orig">-</td>
+                                <td class="edited-value" id="cmp-dims-new">-</td>
+                                <td class="optimized-value" id="cmp-dims-opt">-</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-name">Output size</td>
+                                <td class="original-value">—</td>
+                                <td class="edited-value" id="cmp-outsize-new">-</td>
+                                <td class="optimized-value" id="cmp-outsize-opt">-</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-name">Scale</td>
+                                <td class="original-value">—</td>
+                                <td class="edited-value" id="cmp-scale-new">-</td>
+                                <td class="optimized-value" id="cmp-scale-opt">-</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-name">File size</td>
+                                <td class="original-value" id="cmp-size-orig">-</td>
+                                <td class="edited-value" id="cmp-size-new">-</td>
+                                <td class="optimized-value" id="cmp-size-opt">-</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-name">Duration</td>
+                                <td class="original-value" id="cmp-duration-orig">-</td>
+                                <td class="edited-value" id="cmp-duration-new">-</td>
+                                <td class="optimized-value" id="cmp-duration-opt">-</td>
+                            </tr>
+                            <tr>
+                                <td class="metric-name">Avg. frame delay</td>
+                                <td class="original-value" id="cmp-delay-orig">-</td>
+                                <td class="edited-value" id="cmp-delay-new">-</td>
+                                <td class="optimized-value" id="cmp-delay-opt">-</td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <div
+                        class="export-comparison-diff"
+                        id="export-comparison-diff"
+                    ></div>
+
                 </div>
 
                 <img
@@ -1944,7 +2827,7 @@
 
                 <button
                     type="button"
-                    data-prev="crop"
+                    data-prev="resize"
                 >
                     ← Back
                 </button>
@@ -1971,6 +2854,8 @@
     <script src="gifuct-js.min.js"></script>
 
     <script src="gifshot.min.js"></script>
+
+    <script src="gifsicle.min.js"></script>
 
     <!-- =====================================================
          APPLICATION

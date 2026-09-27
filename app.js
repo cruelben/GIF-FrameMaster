@@ -59,6 +59,99 @@ let animCurrentIndex = -1;
 let animPlaying = false;
 
 
+/* Nome del file GIF originale (solo la prima GIF caricata) */
+let originalFileName = "";
+
+
+/* Dimensione in byte del file GIF originale */
+let originalFileSize = 0;
+
+
+/* ============================================================
+   RESIZE - STATO
+   ============================================================ */
+
+let resizeWidth = 0;
+let resizeHeight = 0;
+
+let resizeLockAspect = true;
+
+let resizeAspectRatio = 1;
+
+const RESIZE_MAX_SIDE = 4000;
+
+let resizePreviewTimer = null;
+
+
+/* ============================================================
+   GIFSICLE - STATO
+   ============================================================
+   Mappa i livelli UI ai parametri CLI di gifsicle.
+   Vedi: gifsicle --help
+
+   --colors N: limita la palette a N colori (max 256 per GIF).
+   --dither:   applica dithering per ridurre il banding
+               quando si riduce la palette.
+
+   Il campo "colors" e "dither" vengono aggiunti al comando
+   in modo dinamico dalla funzione optimizeWithGifsicle(),
+   in base ai controlli UI (#optimize-colors e #optimize-dither).
+   Qui salviamo solo l'optimize level (es. "-O1") e il lossy. */
+const GIFSICLE_LEVELS = {
+
+    lossless: {
+        optimize: "-O1",
+        lossy: null,
+        defaultColors: 256,
+        defaultDither: false
+    },
+
+    light: {
+        optimize: "-O1",
+        lossy: 20,
+        defaultColors: 256,
+        defaultDither: false
+    },
+
+    balanced: {
+        optimize: "-O1",
+        lossy: 40,
+        defaultColors: 256,
+        defaultDither: false
+    },
+
+    aggressive: {
+        optimize: "-O1",
+        lossy: 80,
+        defaultColors: 256,
+        defaultDither: false
+    },
+
+    extreme: {
+        optimize: "-O1",
+        lossy: 80,
+        defaultColors: 128,
+        defaultDither: false
+    },
+
+    custom: {
+        optimize: "-O1",
+        lossy: null,
+        defaultColors: 256,
+        defaultDither: false
+    }
+};
+
+
+/* Risultati intermedi per la tabella di confronto:
+   dimensioni del blob gifshot grezzo e del blob ottimizzato */
+let lastGifshotSizeBytes = 0;
+let lastOptimizedSizeBytes = 0;
+
+/* Se la GIF finale è stata ottimizzata con successo */
+let lastOptimizationSucceeded = false;
+
+
 /* ============================================================
    FUNZIONE DI SUPPORTO DOM
    ============================================================ */
@@ -79,7 +172,6 @@ function showErrorBox(boxId, messageId, techId, message, error) {
     const techEl = $(techId);
 
     if (!box || !msgEl) {
-        /* Fallback: almeno l'alert */
         alert(message + (error ? "\n\n" + error.message : ""));
         return;
     }
@@ -130,7 +222,6 @@ const cropHeight = $("crop-height");
 
 const exportStatus = $("export-status");
 const exportPreview = $("export-preview");
-const exportSummary = $("export-summary");
 
 
 /* ============================================================
@@ -198,7 +289,6 @@ function switchTab(name) {
 
     currentTab = name;
 
-    /* Aggiorna pulsanti tab */
     const tabButtons = document.querySelectorAll(".tab-button");
 
     tabButtons.forEach(function (btn) {
@@ -210,7 +300,6 @@ function switchTab(name) {
         }
     });
 
-    /* Aggiorna pannelli */
     const tabPanels = document.querySelectorAll(".tab-panel");
 
     tabPanels.forEach(function (panel) {
@@ -222,13 +311,10 @@ function switchTab(name) {
         }
     });
 
-    /* Aggiorna stato pulsanti */
     updateTabStates();
 
-    /* Scroll in cima */
     window.scrollTo({ top: 0, behavior: "smooth" });
 
-    /* Refresh specifici per tab */
     if (name === "crop") {
         resizeCropCanvasDisplay();
         updateCropSelectionDisplay();
@@ -239,7 +325,15 @@ function switchTab(name) {
         updateImportTransformDisplay();
     }
 
-    /* Ferma l'anteprima animata se non siamo nella tab frames */
+    if (name === "resize") {
+        syncResizeTabFromCrop();
+        renderResizePreview();
+    }
+
+    if (name === "export") {
+        updateExportSourceLabel();
+    }
+
     if (name !== "frames" && animPlaying) {
         stopAnimPreview();
     }
@@ -256,26 +350,27 @@ function updateTabStates() {
 
         const tab = btn.dataset.tab;
 
-        /* Tab 1 sempre attiva */
         if (tab === "load") {
             btn.disabled = false;
             return;
         }
 
-        /* Tab 2, 4, 5: richiedono almeno 1 frame */
-        if (tab === "frames" || tab === "crop" || tab === "export") {
+        if (
+            tab === "frames" ||
+            tab === "crop" ||
+            tab === "resize" ||
+            tab === "export"
+        ) {
             btn.disabled = !hasFrames;
             return;
         }
 
-        /* Tab 3 (Queue): richiede un import in corso */
         if (tab === "import") {
             btn.disabled = !hasImportInProgress;
             return;
         }
     });
 
-    /* Pallino crop (attivo se crop non è full-frame) */
     const cropDot = document.getElementById("tab-dot-crop");
 
     if (cropDot) {
@@ -292,22 +387,34 @@ function updateTabStates() {
                 : "none";
     }
 
-    /* Abilita/disabilita "Next" della tab 1 */
+    const resizeDot = document.getElementById("tab-dot-resize");
+
+    if (resizeDot) {
+
+        const isSameAsCrop =
+            resizeWidth === cropRect.width &&
+            resizeHeight === cropRect.height;
+
+        resizeDot.style.display =
+            (hasFrames && !isSameAsCrop)
+                ? "inline-block"
+                : "none";
+    }
+
     const tab1Next = document.getElementById("tab1-next");
 
     if (tab1Next) {
         tab1Next.disabled = !hasFrames;
     }
 
-    /* Redirect: se sono sulla tab Queue e non c'è import */
     if (currentTab === "import" && !hasImportInProgress) {
         switchTab(hasFrames ? "frames" : "load");
     }
 
-    /* Redirect: se sono su tab non più valida */
     if (
         (currentTab === "frames" ||
          currentTab === "crop" ||
+         currentTab === "resize" ||
          currentTab === "export") &&
         !hasFrames
     ) {
@@ -319,7 +426,6 @@ function updateTabStates() {
 
 function updateTabCounters() {
 
-    /* Contatore fotogrammi attivi */
     const counterFrames =
         document.getElementById("tab-counter-frames");
 
@@ -339,7 +445,6 @@ function updateTabCounters() {
         }
     }
 
-    /* Contatore crop */
     const counterCrop =
         document.getElementById("tab-counter-crop");
 
@@ -361,6 +466,32 @@ function updateTabCounters() {
         else {
             counterCrop.textContent = "";
             counterCrop.style.display = "none";
+        }
+    }
+
+    const counterResize =
+        document.getElementById("tab-counter-resize");
+
+    if (counterResize) {
+
+        const isSameAsCrop =
+            resizeWidth === cropRect.width &&
+            resizeHeight === cropRect.height;
+
+        if (
+            resizeWidth > 0 &&
+            resizeHeight > 0 &&
+            !isSameAsCrop
+        ) {
+
+            counterResize.textContent =
+                `${Math.round(resizeWidth)}×${Math.round(resizeHeight)}`;
+
+            counterResize.style.display = "inline-block";
+        }
+        else {
+            counterResize.textContent = "";
+            counterResize.style.display = "none";
         }
     }
 }
@@ -431,7 +562,6 @@ function updateFileButtonState() {
         return;
     }
 
-    /* Testo del tab 1 */
     const tab1Button =
         document.querySelector('.tab-button[data-tab="load"]');
 
@@ -473,6 +603,97 @@ function updateFileButtonState() {
     if (typeof updateTabStates === "function") {
         updateTabStates();
     }
+}
+
+
+/* ============================================================
+   NOME FILE SORGENTE (tab 6)
+   ============================================================ */
+
+function updateExportSourceLabel() {
+
+    const el = $("export-source-name");
+
+    if (!el) {
+        return;
+    }
+
+    if (originalFileName) {
+        el.textContent = originalFileName;
+    }
+    else {
+        el.textContent = "-";
+    }
+}
+
+
+/* ============================================================
+   NOME FILE ESPORTATO
+   ============================================================ */
+
+function getExportFileName() {
+
+    if (!originalFileName) {
+        return "GIF_Frame_Master.gif";
+    }
+
+    const baseName = originalFileName.replace(/\.gif$/i, "");
+
+    if (!baseName) {
+        return "GIF_Frame_Master.gif";
+    }
+
+    return baseName + "_edited.gif";
+}
+
+
+/* ============================================================
+   UTILITY: FORMATTAZIONE NUMERI
+   ============================================================ */
+
+function formatBytes(bytes) {
+
+    if (!Number.isFinite(bytes) || bytes < 0) {
+        return "-";
+    }
+
+    if (bytes < 1024) {
+        return bytes + " B";
+    }
+
+    if (bytes < 1024 * 1024) {
+        return (bytes / 1024).toFixed(2) + " KB";
+    }
+
+    if (bytes < 1024 * 1024 * 1024) {
+        return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+    }
+
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+
+function formatDuration(ms) {
+
+    if (!Number.isFinite(ms) || ms < 0) {
+        return "-";
+    }
+
+    return (ms / 1000).toFixed(2) + " s";
+}
+
+
+function formatPercentChange(newValue, oldValue) {
+
+    if (!Number.isFinite(oldValue) || oldValue === 0) {
+        return null;
+    }
+
+    const pct = ((newValue - oldValue) / oldValue) * 100;
+
+    const sign = pct > 0 ? "+" : "";
+
+    return sign + pct.toFixed(0) + "%";
 }
 
 
@@ -628,6 +849,23 @@ function getGifshot() {
 
 
 /* ============================================================
+   CONTROLLO GIFSICLE
+   ============================================================ */
+
+function getGifsicle() {
+
+    if (
+        window.gifsicle &&
+        typeof window.gifsicle.run === "function"
+    ) {
+        return window.gifsicle;
+    }
+
+    return null;
+}
+
+
+/* ============================================================
    CARICAMENTO FILE GIF
    ============================================================ */
 
@@ -641,7 +879,6 @@ if (fileInput) {
             return;
         }
 
-        /* Nascondi errori precedenti */
         hideErrorBox("load-error-box");
         hideErrorBox("import-error-box");
 
@@ -685,7 +922,6 @@ if (fileInput) {
                     error
                 );
 
-                /* Attiva la tab Queue per mostrare l'errore */
                 updateTabStates();
 
                 if (importFrames.length > 0) {
@@ -731,6 +967,11 @@ if (fileInput) {
 
         speedMultiplier = 1;
 
+        /* Reset risultati gifsicle */
+        lastGifshotSizeBytes = 0;
+        lastOptimizedSizeBytes = 0;
+        lastOptimizationSucceeded = false;
+
         const speedSliderReset = $("speed-slider");
 
         if (speedSliderReset) {
@@ -738,7 +979,8 @@ if (fileInput) {
         }
 
         if (exportStatus) exportStatus.textContent = "";
-        if (exportSummary) exportSummary.textContent = "";
+
+        hideExportComparison();
 
         const oldDownloadButton = $("download-gif");
 
@@ -747,11 +989,18 @@ if (fileInput) {
         }
 
 
+        /* Salva il nome e la dimensione del file originale */
+
+        originalFileName = file.name;
+        originalFileSize = file.size;
+
+
         try {
 
             console.log(
                 "GIF Frame Master: loading:",
-                file.name
+                file.name,
+                "(" + formatBytes(file.size) + ")"
             );
 
             const buffer = await file.arrayBuffer();
@@ -879,6 +1128,8 @@ async function loadGif(buffer) {
 
     resetCrop();
 
+    syncResizeTabFromCrop();
+
     updateCropPreview();
 
     updateFrameCount();
@@ -889,7 +1140,7 @@ async function loadGif(buffer) {
 
     updateFileButtonState();
 
-    /* Aggiorna stato tab e passa a "Frames" */
+    updateExportSourceLabel();
 
     updateTabStates();
 
@@ -924,7 +1175,6 @@ function composeAllFrames(frames, width, height) {
 
         const frame = frames[i];
 
-        /* Disposal frame precedente */
         if (previousFrame) {
 
             if (previousFrame.disposalType === 2) {
@@ -947,7 +1197,6 @@ function composeAllFrames(frames, width, height) {
             }
         }
 
-        /* Salvataggio stato prima del frame (disposal 3) */
         if (frame.disposalType === 3) {
             previousCanvasData =
                 ctx.getImageData(0, 0, width, height);
@@ -956,7 +1205,6 @@ function composeAllFrames(frames, width, height) {
             previousCanvasData = null;
         }
 
-        /* Disegno patch */
         if (frame.patch && frame.dims) {
 
             const imageData = new ImageData(
@@ -972,7 +1220,6 @@ function composeAllFrames(frames, width, height) {
             );
         }
 
-        /* Copia completa */
         const frameCanvas = document.createElement("canvas");
 
         frameCanvas.width = width;
@@ -1035,18 +1282,15 @@ function renderFramesGrid() {
             card.classList.add("selected");
         }
 
-        /* Badge */
         const badge = document.createElement("div");
         badge.className = "frame-badge";
         badge.textContent = `#${index + 1}`;
 
-        /* Canvas */
         const canvas = document.createElement("canvas");
         canvas.width = gifWidth;
         canvas.height = gifHeight;
         canvas.getContext("2d").drawImage(frameData.canvas, 0, 0);
 
-        /* Info delay */
         const info = document.createElement("div");
         info.className = "frame-info";
         info.textContent = `${frameData.delay} ms`;
@@ -1055,10 +1299,6 @@ function renderFramesGrid() {
         card.appendChild(canvas);
         card.appendChild(info);
 
-
-        /* --------------------------------------------
-           Click: selezione (con shift per intervallo)
-           -------------------------------------------- */
 
         card.addEventListener("click", function (event) {
 
@@ -1094,10 +1334,6 @@ function renderFramesGrid() {
         });
 
 
-        /* --------------------------------------------
-           Doppio click: anteprima a grandezza reale
-           -------------------------------------------- */
-
         card.addEventListener("dblclick", function (event) {
 
             event.stopPropagation();
@@ -1105,10 +1341,6 @@ function renderFramesGrid() {
             openFramePreview(frameData.canvas, index);
         });
 
-
-        /* --------------------------------------------
-           DRAG & DROP
-           -------------------------------------------- */
 
         card.addEventListener("dragstart", function (event) {
 
@@ -1204,18 +1436,8 @@ function renderFramesGrid() {
     updateFrameCount();
 }
 
-
-/* ============================================================
-   INIZIO PARTE 2/3
-   ============================================================ */
-
-
 /* ============================================================
    ANTEPRIMA ANIMATA (tab 2)
-   ============================================================
-   Riproduce ciclicamente i frame ATTIVI (non selezionati)
-   con i loro delay reali. Serve a vedere il risultato prima
-   di esportare, senza dover attendere gifshot.
    ============================================================ */
 
 const previewAnimCanvas = $("preview-anim-canvas");
@@ -1224,12 +1446,10 @@ const previewAnimFrameLabel = $("preview-anim-frame");
 const previewAnimDelayLabel = $("preview-anim-delay");
 
 
-/* Dimensioni massime del canvas di anteprima */
 const ANIM_PREVIEW_MAX_W = 320;
 const ANIM_PREVIEW_MAX_H = 240;
 
 
-/* Restituisce la lista degli indici dei frame attivi */
 function getActiveFrameIndices() {
 
     const list = [];
@@ -1245,7 +1465,6 @@ function getActiveFrameIndices() {
 }
 
 
-/* Ridimensiona il canvas di anteprima mantenendo le proporzioni */
 function resizeAnimPreviewCanvas() {
 
     if (!previewAnimCanvas || !gifWidth || !gifHeight) {
@@ -1276,7 +1495,6 @@ function resizeAnimPreviewCanvas() {
 }
 
 
-/* Mostra un frame specifico sul canvas di anteprima */
 function drawAnimPreviewFrame(frameIndex) {
 
     if (!previewAnimCanvas) {
@@ -1305,8 +1523,6 @@ function drawAnimPreviewFrame(frameIndex) {
     ctx.drawImage(frame.canvas, 0, 0);
 
 
-    /* Aggiorna etichette */
-
     const activeIndices = getActiveFrameIndices();
 
     const positionInActive =
@@ -1331,7 +1547,6 @@ function drawAnimPreviewFrame(frameIndex) {
 }
 
 
-/* Ferma l'anteprima animata */
 function stopAnimPreview() {
 
     if (animTimerId !== null) {
@@ -1349,14 +1564,12 @@ function stopAnimPreview() {
 }
 
 
-/* Ciclo dell'anteprima: mostra il frame successivo e riprogramma */
 function scheduleNextAnimFrame() {
 
     const activeIndices = getActiveFrameIndices();
 
     if (activeIndices.length === 0) {
 
-        /* Nessun frame attivo: mostra il canvas vuoto */
         if (previewAnimCanvas) {
 
             const ctx = previewAnimCanvas.getContext("2d");
@@ -1382,11 +1595,10 @@ function scheduleNextAnimFrame() {
         return;
     }
 
-    /* Trova la posizione corrente nella lista attiva */
     let position = activeIndices.indexOf(animCurrentIndex);
 
     if (position === -1) {
-        position = -1; /* -1 così il +1 porta a 0 */
+        position = -1;
     }
 
     position = (position + 1) % activeIndices.length;
@@ -1398,7 +1610,6 @@ function scheduleNextAnimFrame() {
     drawAnimPreviewFrame(nextIndex);
 
 
-    /* Programma il prossimo frame in base al delay corrente */
     const frame = composedFrames[nextIndex];
 
     const delay = frame && frame.delay ? frame.delay : 100;
@@ -1410,7 +1621,6 @@ function scheduleNextAnimFrame() {
 }
 
 
-/* Avvia l'anteprima animata */
 function startAnimPreview() {
 
     if (composedFrames.length === 0) {
@@ -1420,8 +1630,6 @@ function startAnimPreview() {
     const activeIndices = getActiveFrameIndices();
 
     if (activeIndices.length === 0) {
-
-        /* Nessun frame attivo: non c'è nulla da riprodurre */
         return;
     }
 
@@ -1433,7 +1641,6 @@ function startAnimPreview() {
         previewAnimToggle.textContent = "■ Stop";
     }
 
-    /* Se l'indice corrente non è attivo, riparti dal primo */
     if (activeIndices.indexOf(animCurrentIndex) === -1) {
         animCurrentIndex = -1;
     }
@@ -1442,14 +1649,9 @@ function startAnimPreview() {
 }
 
 
-/* Aggiorna l'anteprima (dimensioni + frame visualizzato)
-   quando cambia qualcosa nella griglia */
 function updateAnimPreview() {
 
     resizeAnimPreviewCanvas();
-
-    /* Se non stiamo suonando, mostra semplicemente il primo
-       frame attivo (o il canvas vuoto) */
 
     if (!animPlaying) {
 
@@ -1490,7 +1692,6 @@ function updateAnimPreview() {
 }
 
 
-/* Listener del pulsante Play/Stop */
 if (previewAnimToggle) {
 
     previewAnimToggle.addEventListener("click", function () {
@@ -1911,12 +2112,13 @@ if (clearAllButton) {
             return;
         }
 
-        /* Ferma eventuale anteprima animata */
         stopAnimPreview();
 
-        /* Reset dati */
         originalFrames = [];
         composedFrames = [];
+
+        originalFileName = "";
+        originalFileSize = 0;
 
         selectedFrames.clear();
 
@@ -1932,20 +2134,27 @@ if (clearAllButton) {
         cropInteraction = null;
         cropPreviewOverrideIndex = null;
 
+        resizeWidth = 0;
+        resizeHeight = 0;
+        resizeAspectRatio = 1;
+        resizeLockAspect = true;
+
         speedMultiplier = 1;
 
         currentExportData = null;
 
         animCurrentIndex = -1;
 
-        /* Reset import */
+        lastGifshotSizeBytes = 0;
+        lastOptimizedSizeBytes = 0;
+        lastOptimizationSucceeded = false;
+
         importFrames = [];
         importGifWidth = 0;
         importGifHeight = 0;
         importPreviewOverrideIndex = null;
         importDragState = null;
 
-        /* Reset UI */
         const speedSliderReset = $("speed-slider");
 
         if (speedSliderReset) {
@@ -1980,8 +2189,17 @@ if (clearAllButton) {
             updateThumbSizeLabel();
         }
 
+        const resizeWidthInputReset = $("resize-width");
+        const resizeHeightInputReset = $("resize-height");
+        const resizeLockInputReset = $("resize-lock");
+
+        if (resizeWidthInputReset) resizeWidthInputReset.value = "0";
+        if (resizeHeightInputReset) resizeHeightInputReset.value = "0";
+        if (resizeLockInputReset) resizeLockInputReset.checked = true;
+
+        updateResizeScaleFromFields();
+
         if (exportStatus) exportStatus.textContent = "";
-        if (exportSummary) exportSummary.textContent = "";
 
         if (exportPreview) {
 
@@ -1989,6 +2207,8 @@ if (clearAllButton) {
 
             exportPreview.style.display = "none";
         }
+
+        hideExportComparison();
 
         if (frameCount) {
             frameCount.textContent = "0 frames";
@@ -2008,7 +2228,6 @@ if (clearAllButton) {
             framesGrid.innerHTML = "";
         }
 
-        /* Reset canvas anteprima animata */
         if (previewAnimCanvas) {
 
             previewAnimCanvas.width = 1;
@@ -2029,11 +2248,26 @@ if (clearAllButton) {
             cropSelection.style.display = "none";
         }
 
+        const resizePreviewCanvasReset = $("resize-preview-canvas");
+
+        if (resizePreviewCanvasReset) {
+
+            resizePreviewCanvasReset.width = 1;
+            resizePreviewCanvasReset.height = 1;
+            resizePreviewCanvasReset.style.width = "1px";
+            resizePreviewCanvasReset.style.height = "1px";
+        }
+
+        const resizeCurrentSizeReset = $("resize-current-size");
+
+        if (resizeCurrentSizeReset) {
+            resizeCurrentSizeReset.textContent = "-";
+        }
+
         if (fileInput) {
             fileInput.value = "";
         }
 
-        /* Nascondi errori */
         hideErrorBox("load-error-box");
         hideErrorBox("import-error-box");
         hideErrorBox("export-error-box");
@@ -2041,6 +2275,8 @@ if (clearAllButton) {
         updateFileButtonState();
 
         updateSpeedPreview();
+
+        updateExportSourceLabel();
 
         updateTabStates();
 
@@ -2191,6 +2427,8 @@ function resetCrop() {
     };
 
     updateCropSelectionDisplay();
+
+    syncResizeTabFromCrop();
 }
 
 const resetCropButton = $("reset-crop");
@@ -2304,8 +2542,614 @@ function updateCropSelectionDisplay() {
 
 
 /* ============================================================
-   INIZIO PARTE 3/3
+   RESIZE - LOGICA
    ============================================================ */
+
+const resizeWidthInput = $("resize-width");
+const resizeHeightInput = $("resize-height");
+const resizeLockInput = $("resize-lock");
+const resizeScaleSlider = $("resize-scale");
+const resizeScaleValue = $("resize-scale-value");
+const resizeWarning = $("resize-warning");
+const resizeCurrentSizeLabel = $("resize-current-size");
+const resizePreviewCanvas = $("resize-preview-canvas");
+
+const RESIZE_SCALE_MIN = 10;
+const RESIZE_SCALE_MAX = 200;
+
+
+function syncResizeTabFromCrop() {
+
+    if (!cropRect.width || !cropRect.height) {
+        return;
+    }
+
+    resizeWidth = Math.round(cropRect.width);
+    resizeHeight = Math.round(cropRect.height);
+
+    resizeAspectRatio =
+        resizeHeight > 0
+            ? resizeWidth / resizeHeight
+            : 1;
+
+    if (resizeWidthInput) {
+        resizeWidthInput.value = String(resizeWidth);
+    }
+
+    if (resizeHeightInput) {
+        resizeHeightInput.value = String(resizeHeight);
+    }
+
+    if (resizeWidthInput) {
+        resizeWidthInput.classList.remove("input-warning");
+    }
+
+    if (resizeHeightInput) {
+        resizeHeightInput.classList.remove("input-warning");
+    }
+
+    if (resizeWarning) {
+        resizeWarning.classList.remove("visible");
+    }
+
+    if (resizeCurrentSizeLabel) {
+
+        resizeCurrentSizeLabel.textContent =
+            `${Math.round(cropRect.width)} × ${Math.round(cropRect.height)} px`;
+    }
+
+    updateResizeScaleFromFields();
+
+    renderResizePreview();
+
+    if (typeof updateTabCounters === "function") {
+        updateTabCounters();
+    }
+}
+
+
+function updateResizeScaleFromFields() {
+
+    if (!cropRect.width || !cropRect.height) {
+        return;
+    }
+
+    const scalePct = Math.round(
+        (resizeWidth / cropRect.width) * 100
+    );
+
+    if (resizeScaleSlider) {
+
+        let clamped = scalePct;
+
+        if (clamped < RESIZE_SCALE_MIN) {
+            clamped = RESIZE_SCALE_MIN;
+        }
+
+        if (clamped > RESIZE_SCALE_MAX) {
+            clamped = RESIZE_SCALE_MAX;
+        }
+
+        resizeScaleSlider.value = String(clamped);
+    }
+
+    if (resizeScaleValue) {
+        resizeScaleValue.textContent = scalePct + "%";
+    }
+}
+
+
+function applyScalePercent(percent) {
+
+    if (!cropRect.width || !cropRect.height) {
+        return;
+    }
+
+    const factor = percent / 100;
+
+    let w = Math.round(cropRect.width * factor);
+    let h = Math.round(cropRect.height * factor);
+
+    const clampedW = clampResizeValue(w);
+    const clampedH = clampResizeValue(h);
+
+    const wasClamped =
+        clampedW !== w || clampedH !== h;
+
+    resizeWidth = clampedW;
+    resizeHeight = clampedH;
+
+    if (resizeWidthInput) {
+        resizeWidthInput.value = String(resizeWidth);
+    }
+
+    if (resizeHeightInput) {
+        resizeHeightInput.value = String(resizeHeight);
+    }
+
+    showResizeWarningIfNeeded(wasClamped);
+
+    renderResizePreview();
+
+    if (typeof updateTabCounters === "function") {
+        updateTabCounters();
+    }
+}
+
+
+function clampResizeValue(value) {
+
+    let v = Math.round(value);
+
+    if (!Number.isFinite(v) || v < 1) {
+        v = 1;
+    }
+
+    if (v > RESIZE_MAX_SIDE) {
+        v = RESIZE_MAX_SIDE;
+    }
+
+    return v;
+}
+
+
+function showResizeWarningIfNeeded(wasClamped) {
+
+    if (!resizeWarning) {
+        return;
+    }
+
+    if (wasClamped) {
+        resizeWarning.classList.add("visible");
+
+        if (resizeWidthInput && parseInt(resizeWidthInput.value, 10) >= RESIZE_MAX_SIDE) {
+            resizeWidthInput.classList.add("input-warning");
+        }
+        else if (resizeWidthInput) {
+            resizeWidthInput.classList.remove("input-warning");
+        }
+
+        if (resizeHeightInput && parseInt(resizeHeightInput.value, 10) >= RESIZE_MAX_SIDE) {
+            resizeHeightInput.classList.add("input-warning");
+        }
+        else if (resizeHeightInput) {
+            resizeHeightInput.classList.remove("input-warning");
+        }
+    }
+}
+
+
+function handleResizeWidthInput() {
+
+    if (!resizeWidthInput) {
+        return;
+    }
+
+    let raw = parseInt(resizeWidthInput.value, 10);
+
+    if (!Number.isFinite(raw) || raw < 1) {
+        raw = 1;
+    }
+
+    const wasClamped = raw > RESIZE_MAX_SIDE;
+
+    resizeWidth = clampResizeValue(raw);
+
+    resizeWidthInput.value = String(resizeWidth);
+
+    if (resizeLockAspect && resizeAspectRatio > 0) {
+
+        let h = Math.round(resizeWidth / resizeAspectRatio);
+
+        const hClamped = h > RESIZE_MAX_SIDE || h < 1;
+
+        resizeHeight = clampResizeValue(h);
+
+        if (resizeHeightInput) {
+            resizeHeightInput.value = String(resizeHeight);
+        }
+
+        showResizeWarningIfNeeded(wasClamped || hClamped);
+    }
+    else {
+        showResizeWarningIfNeeded(wasClamped);
+    }
+
+    updateResizeScaleFromFields();
+
+    renderResizePreview();
+
+    if (typeof updateTabCounters === "function") {
+        updateTabCounters();
+    }
+}
+
+
+function handleResizeHeightInput() {
+
+    if (!resizeHeightInput) {
+        return;
+    }
+
+    let raw = parseInt(resizeHeightInput.value, 10);
+
+    if (!Number.isFinite(raw) || raw < 1) {
+        raw = 1;
+    }
+
+    const wasClamped = raw > RESIZE_MAX_SIDE;
+
+    resizeHeight = clampResizeValue(raw);
+
+    resizeHeightInput.value = String(resizeHeight);
+
+    if (resizeLockAspect && resizeAspectRatio > 0) {
+
+        let w = Math.round(resizeHeight * resizeAspectRatio);
+
+        const wClamped = w > RESIZE_MAX_SIDE || w < 1;
+
+        resizeWidth = clampResizeValue(w);
+
+        if (resizeWidthInput) {
+            resizeWidthInput.value = String(resizeWidth);
+        }
+
+        showResizeWarningIfNeeded(wasClamped || wClamped);
+    }
+    else {
+        showResizeWarningIfNeeded(wasClamped);
+    }
+
+    updateResizeScaleFromFields();
+
+    renderResizePreview();
+
+    if (typeof updateTabCounters === "function") {
+        updateTabCounters();
+    }
+}
+
+
+function renderResizePreview() {
+
+    if (!resizePreviewCanvas) {
+        return;
+    }
+
+    const index = getCropPreviewFrameIndex();
+
+    if (index === -1 || !cropRect.width || !cropRect.height) {
+        return;
+    }
+
+    const frame = composedFrames[index];
+
+    if (!frame || !frame.canvas) {
+        return;
+    }
+
+    const croppedCanvas = createCroppedCanvas(frame.canvas);
+
+    resizePreviewCanvas.width = resizeWidth;
+    resizePreviewCanvas.height = resizeHeight;
+
+    const ctx = resizePreviewCanvas.getContext("2d");
+
+    ctx.clearRect(0, 0, resizeWidth, resizeHeight);
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    ctx.drawImage(
+        croppedCanvas,
+        0,
+        0,
+        resizeWidth,
+        resizeHeight
+    );
+
+    applyResizePreviewDisplaySize();
+}
+
+
+function applyResizePreviewDisplaySize() {
+
+    if (!resizePreviewCanvas) {
+        return;
+    }
+
+    if (!resizeWidth || !resizeHeight) {
+        return;
+    }
+
+    const maxW = 850;
+    const maxH = 500;
+
+    const scale = Math.min(
+        1,
+        maxW / resizeWidth,
+        maxH / resizeHeight
+    );
+
+    const dw = Math.max(1, Math.round(resizeWidth * scale));
+    const dh = Math.max(1, Math.round(resizeHeight * scale));
+
+    resizePreviewCanvas.style.width = `${dw}px`;
+    resizePreviewCanvas.style.height = `${dh}px`;
+}
+
+
+/* ============================================================
+   RESIZE - LISTENER UI
+   ============================================================ */
+
+if (resizeWidthInput) {
+
+    resizeWidthInput.addEventListener(
+        "change",
+        handleResizeWidthInput
+    );
+
+    resizeWidthInput.addEventListener(
+        "input",
+        function () {
+
+            if (resizePreviewTimer !== null) {
+                clearTimeout(resizePreviewTimer);
+            }
+
+            resizePreviewTimer = setTimeout(
+                function () {
+
+                    resizePreviewTimer = null;
+
+                    handleResizeWidthInput();
+                },
+                250
+            );
+        }
+    );
+
+    resizeWidthInput.addEventListener(
+        "keydown",
+        function (event) {
+
+            if (event.key === "Enter") {
+
+                event.preventDefault();
+
+                resizeWidthInput.blur();
+            }
+        }
+    );
+}
+
+if (resizeHeightInput) {
+
+    resizeHeightInput.addEventListener(
+        "change",
+        handleResizeHeightInput
+    );
+
+    resizeHeightInput.addEventListener(
+        "input",
+        function () {
+
+            if (resizePreviewTimer !== null) {
+                clearTimeout(resizePreviewTimer);
+            }
+
+            resizePreviewTimer = setTimeout(
+                function () {
+
+                    resizePreviewTimer = null;
+
+                    handleResizeHeightInput();
+                },
+                250
+            );
+        }
+    );
+
+    resizeHeightInput.addEventListener(
+        "keydown",
+        function (event) {
+
+            if (event.key === "Enter") {
+
+                event.preventDefault();
+
+                resizeHeightInput.blur();
+            }
+        }
+    );
+}
+
+if (resizeLockInput) {
+
+    resizeLockInput.addEventListener("change", function () {
+
+        resizeLockAspect = resizeLockInput.checked;
+
+        if (resizeLockAspect && resizeAspectRatio > 0) {
+
+            let h = Math.round(resizeWidth / resizeAspectRatio);
+
+            resizeHeight = clampResizeValue(h);
+
+            if (resizeHeightInput) {
+                resizeHeightInput.value = String(resizeHeight);
+            }
+
+            updateResizeScaleFromFields();
+
+            renderResizePreview();
+
+            if (typeof updateTabCounters === "function") {
+                updateTabCounters();
+            }
+        }
+    });
+}
+
+if (resizeScaleSlider) {
+
+    resizeScaleSlider.addEventListener("input", function () {
+
+        const pct = parseFloat(resizeScaleSlider.value) || 100;
+
+        applyScalePercent(pct);
+    });
+}
+
+document.querySelectorAll(".preset-row button").forEach(function (btn) {
+
+    btn.addEventListener("click", function () {
+
+        const pct = parseFloat(btn.dataset.preset);
+
+        if (!Number.isFinite(pct)) {
+            return;
+        }
+
+        if (resizeScaleSlider) {
+
+            let v = pct;
+
+            if (v < RESIZE_SCALE_MIN) {
+                v = RESIZE_SCALE_MIN;
+            }
+
+            if (v > RESIZE_SCALE_MAX) {
+                v = RESIZE_SCALE_MAX;
+            }
+
+            resizeScaleSlider.value = String(v);
+        }
+
+        applyScalePercent(pct);
+    });
+});
+
+
+/* ============================================================
+   GIFSICLE - UI
+   ============================================================ */
+
+const optimizeToggle = $("optimize-toggle");
+const optimizeFields = $("optimize-fields");
+const optimizeLevelSelect = $("optimize-level");
+const optimizeLossyInput = $("optimize-lossy");
+const optimizeColorsSelect = $("optimize-colors");
+const optimizeDitherInput = $("optimize-dither");
+
+
+/* Abilita/disabilita i campi in base alla checkbox principale */
+function updateOptimizeFieldsState() {
+
+    if (!optimizeToggle || !optimizeFields) {
+        return;
+    }
+
+    if (optimizeToggle.checked) {
+        optimizeFields.classList.remove("disabled");
+    }
+    else {
+        optimizeFields.classList.add("disabled");
+    }
+}
+
+if (optimizeToggle) {
+
+    optimizeToggle.addEventListener(
+        "change",
+        updateOptimizeFieldsState
+    );
+
+    updateOptimizeFieldsState();
+}
+
+
+/* Sincronizza i campi UI con il livello selezionato.
+   Ogni livello ha: optimize, lossy, defaultColors, defaultDither.
+   Se l'utente sceglie un livello predefinito, riempiamo
+   Lossy, Colors e Dither con i valori del livello.
+   Se sceglie "custom", lasciamo i campi liberi. */
+function updateFieldsFromLevel() {
+
+    if (!optimizeLevelSelect) {
+        return;
+    }
+
+    const level = optimizeLevelSelect.value;
+    const config = GIFSICLE_LEVELS[level];
+
+    if (!config) {
+        return;
+    }
+
+    /* Lossy */
+    if (optimizeLossyInput) {
+
+        if (level === "lossless") {
+
+            /* Lossless: nessun valore lossy, campo vuoto */
+            optimizeLossyInput.disabled = true;
+            optimizeLossyInput.value = "";
+        }
+        else if (level === "custom") {
+
+            /* Custom: l'utente sceglie, riabilito il campo */
+            optimizeLossyInput.disabled = false;
+
+            if (!optimizeLossyInput.value) {
+                optimizeLossyInput.value = "40";
+            }
+        }
+        else {
+
+            /* Livelli predefiniti: uso il valore della mappa */
+            optimizeLossyInput.disabled = false;
+
+            if (config.lossy !== null && config.lossy !== undefined) {
+                optimizeLossyInput.value = String(config.lossy);
+            }
+        }
+    }
+
+    /* Colors */
+    if (optimizeColorsSelect) {
+
+        if (level === "custom") {
+            /* Custom: non tocco colors */
+        }
+        else if (config.defaultColors) {
+            optimizeColorsSelect.value = String(config.defaultColors);
+        }
+    }
+
+    /* Dither */
+    if (optimizeDitherInput) {
+
+        if (level === "custom") {
+            /* Custom: non tocco dither */
+        }
+        else {
+            optimizeDitherInput.checked = !!config.defaultDither;
+        }
+    }
+}
+
+if (optimizeLevelSelect) {
+
+    optimizeLevelSelect.addEventListener(
+        "change",
+        updateFieldsFromLevel
+    );
+
+    updateFieldsFromLevel();
+}
 
 
 /* ============================================================
@@ -2498,6 +3342,8 @@ if (cropSelection) {
             catch (error) {
                 /* ignoriamo */
             }
+
+            syncResizeTabFromCrop();
         }
     );
 
@@ -2523,6 +3369,7 @@ window.addEventListener(
         resizeImportWindowDisplay();
         updateImportTransformDisplay();
         resizeAnimPreviewCanvas();
+        applyResizePreviewDisplaySize();
     }
 );
 
@@ -2650,8 +3497,6 @@ async function loadImportGif(buffer) {
     applyImportPreset("cover");
 
     renderImportPreviewFrame();
-
-    /* Aggiorna stato tab e passa a "Queue" */
 
     updateTabStates();
 
@@ -3136,8 +3981,6 @@ function confirmImportAppend() {
     updateAnimPreview();
     updateFileButtonState();
 
-    /* Torna alla tab Frames */
-
     updateTabStates();
 
     switchTab("frames");
@@ -3176,6 +4019,45 @@ function createCroppedCanvas(sourceCanvas) {
         0,
         output.width,
         output.height
+    );
+
+    return output;
+}
+
+
+/* ============================================================
+   CREA CANVAS CROPPATO + RESIZE
+   ============================================================ */
+
+function createFinalCanvas(sourceCanvas) {
+
+    const cropped = createCroppedCanvas(sourceCanvas);
+
+    const w = Math.max(1, Math.round(resizeWidth));
+    const h = Math.max(1, Math.round(resizeHeight));
+
+    if (cropped.width === w && cropped.height === h) {
+        return cropped;
+    }
+
+    const output = document.createElement("canvas");
+
+    output.width = w;
+    output.height = h;
+
+    const ctx = output.getContext("2d");
+
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    ctx.drawImage(
+        cropped,
+        0,
+        0,
+        w,
+        h
     );
 
     return output;
@@ -3351,6 +4233,462 @@ function getDataUrlSizeBytes(dataUrl) {
 
 
 /* ============================================================
+   DATA URL -> BLOB
+   ============================================================ */
+
+function dataUrlToBlob(dataUrl) {
+
+    const parts = dataUrl.split(",");
+
+    const mime = parts[0]
+        .match(/:(.*?);/)[1];
+
+    const binary = atob(parts[1]);
+
+    const len = binary.length;
+
+    const bytes = new Uint8Array(len);
+
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+
+    return new Blob([bytes], { type: mime });
+}
+
+
+/* ============================================================
+   BLOB -> BYTE SIZE
+   ============================================================ */
+
+function getBlobSizeBytes(blob) {
+
+    if (!blob) {
+        return 0;
+    }
+
+    if (typeof blob.size === "number") {
+        return blob.size;
+    }
+
+    return 0;
+}
+
+
+/* ============================================================
+   GIFSICLE - OTTIMIZZAZIONE
+   ============================================================
+   Passa il blob GIF attraverso gifsicle WASM e restituisce
+   un nuovo blob ottimizzato. Ritorna null in caso di errore.
+
+   Il comando viene costruito a partire da:
+     - level (GIFSICLE_LEVELS): optimize
+     - colors  (#optimize-colors): 32, 64, 128, 256
+     - dither  (#optimize-dither): on/off
+     - lossy   (#optimize-lossy): valore numerico
+
+   La sintassi di gifsicle-wasm-browser richiede:
+     - Il comando come singola stringa
+     - Il file di input SENZA path (solo "input.gif")
+     - L'output deve essere in /out/
+   ============================================================ */
+
+async function optimizeWithGifsicle(inputBlob, options) {
+
+    const gifsicle = getGifsicle();
+
+    if (!gifsicle) {
+        throw new Error(
+            "gifsicle-wasm-browser was not loaded. Make sure " +
+            "gifsicle.min.js is in the extension folder."
+        );
+    }
+
+    /* Costruisce il comando CLI per gifsicle */
+
+    const cmdParts = [];
+
+    /* 1. Optimize level (-O1) */
+    if (options.optimize) {
+        cmdParts.push(options.optimize);
+    }
+
+    /* 2. Colors */
+    if (
+        options.colors !== null &&
+        options.colors !== undefined &&
+        Number.isFinite(parseInt(options.colors, 10))
+    ) {
+        cmdParts.push("--colors " + parseInt(options.colors, 10));
+    }
+
+    /* 3. Dither */
+    if (options.dither) {
+        cmdParts.push("--dither");
+    }
+
+    /* 4. Lossy value */
+    if (options.lossy !== null && options.lossy !== undefined) {
+
+        const lossyValue = parseInt(options.lossy, 10);
+
+        if (Number.isFinite(lossyValue) && lossyValue > 0) {
+            cmdParts.push("--lossy=" + lossyValue);
+        }
+    }
+
+    /* Comando completo: parametri + file input + output
+       Nota: input.gif SENZA path (gifsicle-wasm-browser
+       lo mette già in /input internamente). */
+
+    const command =
+        cmdParts.join(" ") +
+        " input.gif -o /out/output.gif";
+
+
+    console.log("Gifsicle command:", command);
+
+
+    /* Chiamata alla libreria */
+
+    const result = await gifsicle.run({
+        input: [{
+            file: inputBlob,
+            name: "input.gif"
+        }],
+        command: [command]
+    });
+
+
+    if (!result || !result.length) {
+        throw new Error(
+            "Gifsicle did not return an output file."
+        );
+    }
+
+    const output = result[0];
+
+    if (!output || typeof output.size !== "number" || output.size === 0) {
+        throw new Error(
+            "Gifsicle returned an empty file."
+        );
+    }
+
+    return output;
+}
+
+
+/* ============================================================
+   CONFRONTO ORIGINALE vs EDITATO vs OTTIMIZZATO
+   ============================================================ */
+
+function hideExportComparison() {
+
+    const el = $("export-comparison");
+
+    if (el) {
+        el.classList.remove("visible");
+    }
+}
+
+
+function computeFrameStats(frameList) {
+
+    if (!frameList.length) {
+        return { duration: 0, avgDelay: 0 };
+    }
+
+    let total = 0;
+
+    for (let i = 0; i < frameList.length; i++) {
+        total += normalizeDelay(frameList[i].delay);
+    }
+
+    return {
+        duration: total,
+        avgDelay: total / frameList.length
+    };
+}
+
+
+function showExportComparison(
+    editedFrameCount,
+    editedWidth,
+    editedHeight,
+    gifshotSizeBytes,
+    optimizedSizeBytes,
+    optimizationApplied,
+    editedFrameData
+) {
+
+    const comparison = $("export-comparison");
+
+    if (!comparison) {
+        return;
+    }
+
+    const origFrames = originalFrames.length;
+
+    const origStats = (function () {
+
+        let total = 0;
+
+        for (let i = 0; i < originalFrames.length; i++) {
+            total += normalizeDelay(originalFrames[i].delay);
+        }
+
+        return {
+            duration: total,
+            avgDelay:
+                originalFrames.length > 0
+                    ? total / originalFrames.length
+                    : 0
+        };
+    })();
+
+    const editStats = computeFrameStats(editedFrameData);
+
+    const setText = function (id, value) {
+
+        const el = $(id);
+
+        if (el) {
+            el.textContent = value;
+        }
+    };
+
+    setText("cmp-frames-orig", String(origFrames));
+    setText("cmp-frames-new", String(editedFrameCount));
+    setText(
+        "cmp-frames-opt",
+        optimizationApplied
+            ? String(editedFrameCount)
+            : "—"
+    );
+
+    setText(
+        "cmp-dims-orig",
+        `${gifWidth} × ${gifHeight}`
+    );
+    setText(
+        "cmp-dims-new",
+        `${Math.round(cropRect.width)} × ${Math.round(cropRect.height)}`
+    );
+    setText(
+        "cmp-dims-opt",
+        optimizationApplied
+            ? `${editedWidth} × ${editedHeight}`
+            : "—"
+    );
+
+    setText(
+        "cmp-outsize-new",
+        `${editedWidth} × ${editedHeight}`
+    );
+    setText(
+        "cmp-outsize-opt",
+        optimizationApplied
+            ? `${editedWidth} × ${editedHeight}`
+            : "—"
+    );
+
+    const scalePct = cropRect.width > 0
+        ? Math.round((editedWidth / cropRect.width) * 100)
+        : 100;
+
+    setText("cmp-scale-new", scalePct + "%");
+    setText(
+        "cmp-scale-opt",
+        optimizationApplied
+            ? scalePct + "%"
+            : "—"
+    );
+
+    setText(
+        "cmp-size-orig",
+        formatBytes(originalFileSize)
+    );
+    setText(
+        "cmp-size-new",
+        formatBytes(gifshotSizeBytes)
+    );
+    setText(
+        "cmp-size-opt",
+        optimizationApplied
+            ? formatBytes(optimizedSizeBytes)
+            : "—"
+    );
+
+    setText(
+        "cmp-duration-orig",
+        formatDuration(origStats.duration)
+    );
+    setText(
+        "cmp-duration-new",
+        formatDuration(editStats.duration)
+    );
+    setText(
+        "cmp-duration-opt",
+        optimizationApplied
+            ? formatDuration(editStats.duration)
+            : "—"
+    );
+
+    setText(
+        "cmp-delay-orig",
+        Math.round(origStats.avgDelay) + " ms"
+    );
+    setText(
+        "cmp-delay-new",
+        Math.round(editStats.avgDelay) + " ms"
+    );
+    setText(
+        "cmp-delay-opt",
+        optimizationApplied
+            ? Math.round(editStats.avgDelay) + " ms"
+            : "—"
+    );
+
+    const diffContainer = $("export-comparison-diff");
+
+    if (diffContainer) {
+
+        diffContainer.innerHTML = "";
+
+        const lines = [];
+
+        if (originalFileSize > 0) {
+
+            const finalSize = optimizationApplied
+                ? optimizedSizeBytes
+                : gifshotSizeBytes;
+
+            const numPct =
+                ((finalSize - originalFileSize) /
+                 originalFileSize) * 100;
+
+            const cls = numPct < -0.5
+                ? "diff-positive"
+                : (numPct > 0.5 ? "diff-negative" : "diff-neutral");
+
+            const arrow = numPct < -0.5
+                ? "📉"
+                : (numPct > 0.5 ? "📈" : "➡");
+
+            const word = numPct < -0.5
+                ? "reduced by"
+                : (numPct > 0.5 ? "increased by" : "unchanged");
+
+            lines.push(
+                `<span class="diff-line ${cls}">` +
+                `${arrow} Final file size ${word} ` +
+                `${Math.abs(numPct).toFixed(0)}% ` +
+                `(${formatBytes(originalFileSize)} → ${formatBytes(finalSize)})` +
+                `</span>`
+            );
+        }
+
+        if (
+            optimizationApplied &&
+            gifshotSizeBytes > 0 &&
+            optimizedSizeBytes > 0
+        ) {
+
+            const gifPct =
+                ((optimizedSizeBytes - gifshotSizeBytes) /
+                 gifshotSizeBytes) * 100;
+
+            if (gifPct < -0.5) {
+
+                lines.push(
+                    `<span class="diff-line diff-positive">` +
+                    `⚙️ Gifsicle saved a further ` +
+                    `${Math.abs(gifPct).toFixed(0)}% ` +
+                    `(${formatBytes(gifshotSizeBytes)} → ${formatBytes(optimizedSizeBytes)})` +
+                    `</span>`
+                );
+            }
+            else if (gifPct > 0.5) {
+
+                lines.push(
+                    `<span class="diff-line diff-negative">` +
+                    `⚠️ Gifsicle increased size by ` +
+                    `${gifPct.toFixed(0)}% ` +
+                    `(${formatBytes(gifshotSizeBytes)} → ${formatBytes(optimizedSizeBytes)})` +
+                    `</span>`
+                );
+            }
+        }
+
+        const origPixels = gifWidth * gifHeight;
+        const cropPixels = cropRect.width * cropRect.height;
+
+        if (origPixels > 0 && cropPixels !== origPixels) {
+
+            const numPct =
+                ((cropPixels - origPixels) / origPixels) * 100;
+
+            const cls = numPct < -0.5
+                ? "diff-positive"
+                : (numPct > 0.5 ? "diff-negative" : "diff-neutral");
+
+            const arrow = numPct < -0.5
+                ? "📉"
+                : (numPct > 0.5 ? "📈" : "➡");
+
+            const word = numPct < -0.5
+                ? "reduced by"
+                : (numPct > 0.5 ? "increased by" : "unchanged");
+
+            lines.push(
+                `<span class="diff-line ${cls}">` +
+                `${arrow} Dimensions ${word} ` +
+                `${Math.abs(numPct).toFixed(0)}% ` +
+                `(${gifWidth}×${gifHeight} → ${Math.round(cropRect.width)}×${Math.round(cropRect.height)})` +
+                `</span>`
+            );
+        }
+
+        if (origFrames > 0 && editedFrameCount !== origFrames) {
+
+            const numPct =
+                ((editedFrameCount - origFrames) / origFrames) * 100;
+
+            const cls = numPct < -0.5
+                ? "diff-positive"
+                : (numPct > 0.5 ? "diff-negative" : "diff-neutral");
+
+            const arrow = numPct < -0.5
+                ? "📉"
+                : (numPct > 0.5 ? "📈" : "➡");
+
+            const word = numPct < -0.5
+                ? "reduced by"
+                : (numPct > 0.5 ? "increased by" : "unchanged");
+
+            lines.push(
+                `<span class="diff-line ${cls}">` +
+                `${arrow} Frames ${word} ` +
+                `${Math.abs(numPct).toFixed(0)}% ` +
+                `(${origFrames} → ${editedFrameCount})` +
+                `</span>`
+            );
+        }
+
+        if (lines.length === 0) {
+            lines.push(
+                `<span class="diff-line diff-neutral">➡ No significant changes</span>`
+            );
+        }
+
+        diffContainer.innerHTML = lines.join("");
+    }
+
+    comparison.classList.add("visible");
+}
+
+
+/* ============================================================
    PREPARAZIONE FRAME PER ESPORTAZIONE
    ============================================================ */
 
@@ -3363,9 +4701,9 @@ async function prepareExportImages(activeIndices) {
 
         const frame = composedFrames[index];
 
-        const cropped = createCroppedCanvas(frame.canvas);
+        const finalCanvas = createFinalCanvas(frame.canvas);
 
-        const dataUrl = cropped.toDataURL("image/png");
+        const dataUrl = finalCanvas.toDataURL("image/png");
 
         images.push(dataUrl);
 
@@ -3399,8 +4737,9 @@ if (exportButton) {
 
 async function exportGif() {
 
-    /* Nascondi errori precedenti */
     hideErrorBox("export-error-box");
+
+    hideExportComparison();
 
     const gifshot = getGifshot();
 
@@ -3455,6 +4794,19 @@ async function exportGif() {
         return;
     }
 
+    if (!resizeWidth || !resizeHeight) {
+
+        showErrorBox(
+            "export-error-box",
+            "export-error-message",
+            "export-error-technical",
+            "The output size is not valid.",
+            null
+        );
+
+        return;
+    }
+
     /* Ping-pong */
 
     const pingPongToggle = $("pingpong-toggle");
@@ -3487,10 +4839,6 @@ async function exportGif() {
             "Preparing frames...";
     }
 
-    if (exportSummary) {
-        exportSummary.textContent = "";
-    }
-
     if (exportPreview) {
         exportPreview.style.display = "none";
     }
@@ -3507,12 +4855,12 @@ async function exportGif() {
 
         const outputWidth = Math.max(
             1,
-            Math.round(cropRect.width)
+            Math.round(resizeWidth)
         );
 
         const outputHeight = Math.max(
             1,
-            Math.round(cropRect.height)
+            Math.round(resizeHeight)
         );
 
         const baseDelay =
@@ -3599,41 +4947,7 @@ async function exportGif() {
                                 return;
                             }
 
-                            currentExportData = result.image;
-
-                            if (exportPreview) {
-
-                                exportPreview.src = result.image;
-
-                                exportPreview.style.display = "block";
-                            }
-
-                            if (exportStatus) {
-
-                                exportStatus.textContent =
-                                    "GIF created successfully.";
-                            }
-
-                            if (exportSummary) {
-
-                                const sizeBytes =
-                                    getDataUrlSizeBytes(result.image);
-
-                                const sizeMB = (
-                                    sizeBytes / (1024 * 1024)
-                                ).toFixed(2);
-
-                                exportSummary.textContent =
-                                    `${images.length} frames exported` +
-                                    (usePingPong
-                                        ? ` (ping-pong included)`
-                                        : ``) +
-                                    ` · ${sizeMB} MB`;
-                            }
-
-                            createDownloadButton(result.image);
-
-                            resolve();
+                            resolve(result.image);
                         }
                     );
                 }
@@ -3642,7 +4956,229 @@ async function exportGif() {
                     reject(innerError);
                 }
             }
-        );
+        ).then(async function (gifshotDataUrl) {
+
+            /* ---------------------------------------------
+               GIFSHOT HA PRODOTTO LA GIF GREZZA
+               --------------------------------------------- */
+
+            const gifshotSizeBytes =
+                getDataUrlSizeBytes(gifshotDataUrl);
+
+            lastGifshotSizeBytes = gifshotSizeBytes;
+
+            console.log(
+                "Gifshot output size:",
+                formatBytes(gifshotSizeBytes)
+            );
+
+
+            /* ---------------------------------------------
+               OTTIMIZZAZIONE CON GIFSICLE
+               --------------------------------------------- */
+
+            let finalDataUrl = gifshotDataUrl;
+            let finalSizeBytes = gifshotSizeBytes;
+            let optimizationApplied = false;
+
+            const optimizeCheckbox = $("optimize-toggle");
+
+            const shouldOptimize =
+                optimizeCheckbox && optimizeCheckbox.checked;
+
+            if (shouldOptimize) {
+
+                const gifsicle = getGifsicle();
+
+                if (!gifsicle) {
+
+                    console.warn(
+                        "Gifsicle not available — skipping optimization."
+                    );
+
+                    if (exportStatus) {
+                        exportStatus.textContent =
+                            "GIF created (Gifsicle not available).";
+                    }
+                }
+                else {
+
+                    if (exportStatus) {
+                        exportStatus.textContent =
+                            "Optimizing with Gifsicle...";
+                    }
+
+                    try {
+
+                        /* --------- Legge i parametri dalla UI ---------
+                           Unica fonte di verità: i controlli UI.
+                           I default dei livelli sono usati SOLO
+                           in updateFieldsFromLevel() per popolare
+                           la UI quando si sceglie un preset. */
+
+                        const level =
+                            optimizeLevelSelect
+                                ? optimizeLevelSelect.value
+                                : "balanced";
+
+                        const config =
+                            GIFSICLE_LEVELS[level] ||
+                            GIFSICLE_LEVELS.balanced;
+
+                        /* Lossy: solo dal campo input */
+                        let lossyValue = null;
+
+                        if (optimizeLossyInput) {
+                            const lossyVal =
+                                parseInt(optimizeLossyInput.value, 10);
+
+                            if (Number.isFinite(lossyVal) && lossyVal > 0) {
+                                lossyValue = lossyVal;
+                            }
+                        }
+
+                        /* Colors: solo dal select UI */
+                        let colorsValue = 256;
+
+                        if (optimizeColorsSelect) {
+                            const c = parseInt(
+                                optimizeColorsSelect.value,
+                                10
+                            );
+
+                            if (Number.isFinite(c) && c > 0) {
+                                colorsValue = c;
+                            }
+                        }
+
+                        /* Dither: solo dalla checkbox UI */
+                        let ditherEnabled = false;
+
+                        if (optimizeDitherInput) {
+                            ditherEnabled =
+                                optimizeDitherInput.checked === true;
+                        }
+
+                        /* Config finale passata alla funzione */
+
+                        const finalConfig = {
+                            optimize: config.optimize,
+                            lossy: lossyValue,
+                            colors: colorsValue,
+                            dither: ditherEnabled
+                        };
+
+                        console.log(
+                            "Gifsicle config:",
+                            JSON.stringify(finalConfig)
+                        );
+
+                        const inputBlob =
+                            dataUrlToBlob(gifshotDataUrl);
+
+                        const optimizedBlob =
+                            await optimizeWithGifsicle(
+                                inputBlob,
+                                finalConfig
+                            );
+
+                        finalDataUrl = await new Promise(
+                            function (resolve, reject) {
+
+                                const reader =
+                                    new FileReader();
+
+                                reader.onload = function () {
+                                    resolve(reader.result);
+                                };
+
+                                reader.onerror = function () {
+                                    reject(
+                                        new Error(
+                                            "Could not read the optimized blob."
+                                        )
+                                    );
+                                };
+
+                                reader.readAsDataURL(optimizedBlob);
+                            }
+                        );
+
+                        finalSizeBytes = getBlobSizeBytes(optimizedBlob);
+
+                        optimizationApplied = true;
+
+                        lastOptimizedSizeBytes = finalSizeBytes;
+                        lastOptimizationSucceeded = true;
+
+                        console.log(
+                            "Gifsicle output size:",
+                            formatBytes(finalSizeBytes),
+                            "(" +
+                            Math.round(
+                                ((finalSizeBytes - gifshotSizeBytes) /
+                                 gifshotSizeBytes) * 100
+                            ) + "% vs gifshot)"
+                        );
+
+                        if (exportStatus) {
+                            exportStatus.textContent =
+                                "GIF created and optimized.";
+                        }
+                    }
+                    catch (optError) {
+
+                        console.error(
+                            "Gifsicle optimization failed:",
+                            optError
+                        );
+
+                        optimizationApplied = false;
+
+                        lastOptimizedSizeBytes = 0;
+                        lastOptimizationSucceeded = false;
+
+                        if (exportStatus) {
+                            exportStatus.textContent =
+                                "GIF created (optimization failed).";
+                        }
+                    }
+                }
+            }
+            else {
+
+                if (exportStatus) {
+                    exportStatus.textContent =
+                        "GIF created successfully.";
+                }
+            }
+
+
+            /* ---------------------------------------------
+               AGGIORNA PREVIEW E DOWNLOAD
+               --------------------------------------------- */
+
+            currentExportData = finalDataUrl;
+
+            if (exportPreview) {
+
+                exportPreview.src = finalDataUrl;
+
+                exportPreview.style.display = "block";
+            }
+
+            showExportComparison(
+                images.length,
+                outputWidth,
+                outputHeight,
+                gifshotSizeBytes,
+                finalSizeBytes,
+                optimizationApplied,
+                activeFrameData
+            );
+
+            createDownloadButton(finalDataUrl);
+        });
     }
     catch (error) {
 
@@ -3706,10 +5242,7 @@ function createDownloadButton(dataUrl) {
         "click",
         function () {
 
-            downloadDataUrl(
-                dataUrl,
-                "GIF_Frame_Master.gif"
-            );
+            saveGifFile(dataUrl);
         }
     );
 
@@ -3718,7 +5251,58 @@ function createDownloadButton(dataUrl) {
 
 
 /* ============================================================
-   DOWNLOAD
+   SALVATAGGIO FILE
+   ============================================================ */
+
+async function saveGifFile(dataUrl) {
+
+    const fileName = getExportFileName();
+
+    if (
+        typeof window.showSaveFilePicker === "function"
+    ) {
+
+        try {
+
+            const blob = dataUrlToBlob(dataUrl);
+
+            const handle = await window.showSaveFilePicker({
+                suggestedName: fileName,
+                types: [{
+                    description: "GIF image",
+                    accept: {
+                        "image/gif": [".gif"]
+                    }
+                }]
+            });
+
+            const writable = await handle.createWritable();
+
+            await writable.write(blob);
+
+            await writable.close();
+
+            return;
+        }
+        catch (error) {
+
+            if (error && error.name === "AbortError") {
+                return;
+            }
+
+            console.warn(
+                "showSaveFilePicker failed, falling back:",
+                error
+            );
+        }
+    }
+
+    downloadDataUrl(dataUrl, fileName);
+}
+
+
+/* ============================================================
+   DOWNLOAD (fallback)
    ============================================================ */
 
 function downloadDataUrl(dataUrl, filename) {
@@ -3745,6 +5329,8 @@ updateTabStates();
 
 resizeAnimPreviewCanvas();
 
+updateExportSourceLabel();
+
 
 /* ============================================================
    LOG DI DEBUG
@@ -3764,6 +5350,18 @@ console.log(
 console.log(
     "gifshot:",
     getGifshot() ? "OK" : "NOT FOUND"
+);
+
+console.log(
+    "gifsicle:",
+    getGifsicle() ? "OK" : "NOT FOUND"
+);
+
+console.log(
+    "showSaveFilePicker:",
+    typeof window.showSaveFilePicker === "function"
+        ? "available"
+        : "not available (using fallback)"
 );
 
 console.log("========================================");
