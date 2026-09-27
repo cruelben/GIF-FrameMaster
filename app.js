@@ -103,35 +103,35 @@ const GIFSICLE_LEVELS = {
         optimize: "-O1",
         lossy: null,
         defaultColors: 256,
-        defaultDither: false
+        defaultDither: true
     },
 
     light: {
         optimize: "-O1",
         lossy: 20,
         defaultColors: 256,
-        defaultDither: false
+        defaultDither: true
     },
 
     balanced: {
         optimize: "-O1",
         lossy: 40,
         defaultColors: 256,
-        defaultDither: false
+        defaultDither: true
     },
 
     aggressive: {
         optimize: "-O1",
         lossy: 80,
         defaultColors: 256,
-        defaultDither: false
+        defaultDither: true
     },
 
     extreme: {
         optimize: "-O1",
         lossy: 80,
         defaultColors: 128,
-        defaultDither: false
+        defaultDither: true
     },
 
     custom: {
