@@ -403,6 +403,10 @@ if (fileInput) {
                 exportWorkspace.style.display = "none";
             }
 
+            if (importWorkspace) {
+                importWorkspace.style.display = "none";
+            }
+
 
             if (exportPreview) {
                 exportPreview.style.display = "none";
@@ -411,12 +415,24 @@ if (fileInput) {
 
             /*
                Nuovo file: azzeriamo selezione, undo,
-               velocità e stato di esportazione precedente.
+               velocità, stato di esportazione precedente
+               e un eventuale import di una seconda GIF
+               rimasto a metà.
             */
 
             selectedFrames.clear();
 
             undoStack = [];
+
+            importFrames = [];
+
+            importGifWidth = 0;
+
+            importGifHeight = 0;
+
+            importPreviewOverrideIndex = null;
+
+            importDragState = null;
 
             speedMultiplier = 1;
 
@@ -2416,8 +2432,1015 @@ window.addEventListener(
         resizeCropCanvasDisplay();
 
         updateCropSelectionDisplay();
+
+        resizeImportWindowDisplay();
+
+        updateImportTransformDisplay();
     }
 );
+
+
+/* ============================================================
+   AGGIUNTA DI UNA SECONDA GIF IN CODA
+   ============================================================
+
+   Il pulsante "+" nella toolbar dei fotogrammi apre un
+   pannello dedicato dove l'utente può caricare una seconda
+   GIF, posizionarla (trascinamento + zoom) dentro una
+   finestra fissa che rappresenta le dimensioni della GIF
+   principale (esattamente come il ritaglio circolare di un
+   avatar), scegliere un colore di sfondo per le zone
+   scoperte e infine accodare i fotogrammi risultanti in
+   fondo a "composedFrames".
+
+   Vengono mantenuti solo i fotogrammi (immagine + delay
+   originale) della seconda GIF: velocità, ping-pong e
+   crop restano proprietà globali dell'esportazione e si
+   applicano automaticamente anche ai fotogrammi importati.
+   ============================================================ */
+
+let importFrames = [];
+
+let importGifWidth = 0;
+let importGifHeight = 0;
+
+let importScale = 1;
+let importPanX = 0;
+let importPanY = 0;
+
+let importBackgroundColor = "#ffffff";
+
+let importPreviewOverrideIndex = null;
+
+let importDragState = null;
+
+const importWorkspace = $("import-workspace");
+const importWindow = $("import-window");
+const importDragCanvas = $("import-drag-canvas");
+
+const addGifQueueButton = $("add-gif-queue");
+const importGifFileInput = $("import-gif-file");
+
+const importPreviewFrameInput = $("import-preview-frame");
+const importPreviewRefreshButton = $("import-preview-refresh");
+
+const importZoomSlider = $("import-zoom");
+const importBgColorInput = $("import-bgcolor");
+
+const importPresetCoverButton = $("import-preset-cover");
+const importPresetContainButton = $("import-preset-contain");
+
+const importConfirmButton = $("import-confirm");
+const importCancelButton = $("import-cancel");
+
+const importTargetDimsLabel = $("import-target-dims");
+
+
+/* ----------------------------------------------------------
+   APERTURA PANNELLO (pulsante "+")
+   ---------------------------------------------------------- */
+
+if (addGifQueueButton) {
+
+    addGifQueueButton.addEventListener(
+        "click",
+        function () {
+
+            if (composedFrames.length === 0) {
+
+                alert(
+                    "Carica prima una GIF principale."
+                );
+
+                return;
+            }
+
+            if (importGifFileInput) {
+
+                importGifFileInput.click();
+            }
+        }
+    );
+}
+
+
+/* ----------------------------------------------------------
+   CARICAMENTO DELLA SECONDA GIF
+   ---------------------------------------------------------- */
+
+if (importGifFileInput) {
+
+    importGifFileInput.addEventListener(
+        "change",
+        async function (event) {
+
+            const file =
+                event.target.files[0];
+
+            if (!file) {
+                return;
+            }
+
+
+            if (
+                file.type !== "image/gif" &&
+                !file.name
+                    .toLowerCase()
+                    .endsWith(".gif")
+            ) {
+
+                alert(
+                    "Il file selezionato non è una GIF."
+                );
+
+                importGifFileInput.value = "";
+
+                return;
+            }
+
+
+            try {
+
+                const buffer =
+                    await file.arrayBuffer();
+
+
+                await loadImportGif(
+                    buffer
+                );
+            }
+            catch (error) {
+
+                console.error(
+                    "ERRORE IMPORT GIF:",
+                    error
+                );
+
+
+                alert(
+                    "Impossibile leggere la GIF da " +
+                    "accodare.\n\nErrore: " +
+                    error.message
+                );
+            }
+            finally {
+
+                importGifFileInput.value = "";
+            }
+        }
+    );
+}
+
+async function loadImportGif(buffer) {
+
+    const gifuct =
+        getGifuct();
+
+
+    if (!gifuct) {
+
+        throw new Error(
+            "gifuct-js non è stato trovato."
+        );
+    }
+
+
+    let gif = null;
+    let frames = null;
+
+
+    if (gifuct.type === "modern") {
+
+        gif =
+            gifuct.library.parseGIF(
+                buffer
+            );
+
+
+        frames =
+            gifuct.library.decompressFrames(
+                gif,
+                true
+            );
+    }
+
+    else if (gifuct.type === "legacy") {
+
+        const decoder =
+            new gifuct.library(
+                buffer
+            );
+
+
+        frames =
+            decoder.decompressFrames(
+                true
+            );
+    }
+
+
+    if (
+        !frames ||
+        !Array.isArray(frames) ||
+        frames.length === 0
+    ) {
+
+        throw new Error(
+            "Nessun fotogramma trovato nella GIF " +
+            "da accodare."
+        );
+    }
+
+
+    let w = 0;
+    let h = 0;
+
+
+    if (
+        gif &&
+        gif.lsd &&
+        gif.lsd.width &&
+        gif.lsd.height
+    ) {
+
+        w = gif.lsd.width;
+        h = gif.lsd.height;
+    }
+
+    else if (frames[0].dims) {
+
+        w = frames[0].dims.width;
+        h = frames[0].dims.height;
+    }
+
+
+    if (!w || !h) {
+
+        throw new Error(
+            "Impossibile determinare le dimensioni " +
+            "della GIF da accodare."
+        );
+    }
+
+
+    importFrames =
+        composeAllFrames(
+            frames,
+            w,
+            h
+        );
+
+    importGifWidth = w;
+    importGifHeight = h;
+
+
+    if (!importFrames.length) {
+
+        throw new Error(
+            "Impossibile ricostruire i fotogrammi " +
+            "della GIF da accodare."
+        );
+    }
+
+
+    importPreviewOverrideIndex = null;
+
+
+    if (importPreviewFrameInput) {
+
+        importPreviewFrameInput.value = "1";
+
+        importPreviewFrameInput.max =
+            importFrames.length;
+    }
+
+
+    if (importTargetDimsLabel) {
+
+        importTargetDimsLabel.textContent =
+            `${gifWidth} × ${gifHeight} px`;
+    }
+
+
+    if (importBgColorInput) {
+
+        importBackgroundColor =
+            importBgColorInput.value || "#ffffff";
+    }
+
+
+    applyImportPreset("cover");
+
+
+    if (importWorkspace) {
+
+        importWorkspace.style.display = "block";
+
+        importWorkspace.scrollIntoView(
+            {
+                behavior: "smooth",
+                block: "start"
+            }
+        );
+    }
+
+
+    renderImportPreviewFrame();
+}
+
+
+/* ----------------------------------------------------------
+   SCELTA DEL FOTOGRAMMA DI ANTEPRIMA (GIF DA ACCODARE)
+   ---------------------------------------------------------- */
+
+function getImportPreviewFrameIndex() {
+
+    if (
+        importPreviewOverrideIndex !== null &&
+        importPreviewOverrideIndex >= 0 &&
+        importPreviewOverrideIndex < importFrames.length
+    ) {
+
+        return importPreviewOverrideIndex;
+    }
+
+    return 0;
+}
+
+function renderImportPreviewFrame() {
+
+    if (
+        !importDragCanvas ||
+        importFrames.length === 0
+    ) {
+
+        return;
+    }
+
+
+    const index =
+        getImportPreviewFrameIndex();
+
+
+    const frame =
+        importFrames[index];
+
+
+    importDragCanvas.width =
+        importGifWidth;
+
+    importDragCanvas.height =
+        importGifHeight;
+
+
+    const ctx =
+        importDragCanvas.getContext("2d");
+
+
+    ctx.clearRect(
+        0,
+        0,
+        importGifWidth,
+        importGifHeight
+    );
+
+
+    ctx.drawImage(
+        frame.canvas,
+        0,
+        0
+    );
+
+
+    resizeImportWindowDisplay();
+
+    updateImportTransformDisplay();
+}
+
+if (importPreviewRefreshButton) {
+
+    importPreviewRefreshButton.addEventListener(
+        "click",
+        function () {
+
+            applyImportPreviewFrameChoice();
+        }
+    );
+}
+
+if (importPreviewFrameInput) {
+
+    importPreviewFrameInput.addEventListener(
+        "keydown",
+        function (event) {
+
+            if (event.key === "Enter") {
+
+                event.preventDefault();
+
+                applyImportPreviewFrameChoice();
+            }
+        }
+    );
+}
+
+function applyImportPreviewFrameChoice() {
+
+    if (
+        !importPreviewFrameInput ||
+        importFrames.length === 0
+    ) {
+
+        return;
+    }
+
+
+    let n =
+        parseInt(
+            importPreviewFrameInput.value,
+            10
+        );
+
+
+    if (!Number.isFinite(n) || n < 1) {
+
+        n = 1;
+    }
+
+
+    if (n > importFrames.length) {
+
+        n = importFrames.length;
+    }
+
+
+    importPreviewFrameInput.value = n;
+
+    importPreviewOverrideIndex = n - 1;
+
+
+    renderImportPreviewFrame();
+}
+
+
+/* ----------------------------------------------------------
+   DIMENSIONI DISPLAY DELLA FINESTRA DI IMPORT
+   (rappresenta le dimensioni fisse della GIF principale)
+   ---------------------------------------------------------- */
+
+function resizeImportWindowDisplay() {
+
+    if (
+        !importWindow ||
+        !gifWidth ||
+        !gifHeight
+    ) {
+
+        return;
+    }
+
+
+    const maxWidth = 850;
+    const maxHeight = 500;
+
+
+    const scale =
+        Math.min(
+            1,
+            maxWidth / gifWidth,
+            maxHeight / gifHeight
+        );
+
+
+    const displayWidth =
+        Math.round(
+            gifWidth * scale
+        );
+
+
+    const displayHeight =
+        Math.round(
+            gifHeight * scale
+        );
+
+
+    importWindow.style.width =
+        `${displayWidth}px`;
+
+    importWindow.style.height =
+        `${displayHeight}px`;
+}
+
+
+/* ----------------------------------------------------------
+   AGGIORNAMENTO POSIZIONE/ZOOM DEL FOTOGRAMMA DA ACCODARE
+   ---------------------------------------------------------- */
+
+function updateImportTransformDisplay() {
+
+    if (
+        !importDragCanvas ||
+        !importWindow ||
+        !gifWidth ||
+        !gifHeight
+    ) {
+
+        return;
+    }
+
+
+    importWindow.style.background =
+        importBackgroundColor;
+
+
+    const rect =
+        importWindow.getBoundingClientRect();
+
+
+    if (rect.width <= 0) {
+
+        return;
+    }
+
+
+    const displayScale =
+        rect.width / gifWidth;
+
+
+    const drawWidth =
+        importGifWidth *
+        importScale *
+        displayScale;
+
+
+    const drawHeight =
+        importGifHeight *
+        importScale *
+        displayScale;
+
+
+    importDragCanvas.style.width =
+        `${drawWidth}px`;
+
+    importDragCanvas.style.height =
+        `${drawHeight}px`;
+
+    importDragCanvas.style.left =
+        `${importPanX * displayScale}px`;
+
+    importDragCanvas.style.top =
+        `${importPanY * displayScale}px`;
+}
+
+
+/* ----------------------------------------------------------
+   PRESET: ADATTA RIEMPIENDO (cover) / ADATTA CON MARGINI (contain)
+   ---------------------------------------------------------- */
+
+function applyImportPreset(kind) {
+
+    if (
+        !importGifWidth ||
+        !importGifHeight ||
+        !gifWidth ||
+        !gifHeight
+    ) {
+
+        return;
+    }
+
+
+    let scale;
+
+
+    if (kind === "contain") {
+
+        scale =
+            Math.min(
+                gifWidth / importGifWidth,
+                gifHeight / importGifHeight
+            );
+    }
+
+    else {
+
+        scale =
+            Math.max(
+                gifWidth / importGifWidth,
+                gifHeight / importGifHeight
+            );
+    }
+
+
+    importScale = scale;
+
+
+    importPanX =
+        (gifWidth - importGifWidth * scale) / 2;
+
+    importPanY =
+        (gifHeight - importGifHeight * scale) / 2;
+
+
+    if (importZoomSlider) {
+
+        const minZoom =
+            parseFloat(importZoomSlider.min) || 0.05;
+
+        const maxZoom =
+            parseFloat(importZoomSlider.max) || 5;
+
+        const clamped =
+            Math.max(
+                minZoom,
+                Math.min(
+                    maxZoom,
+                    scale
+                )
+            );
+
+        importZoomSlider.value =
+            clamped.toFixed(2);
+    }
+
+
+    updateImportTransformDisplay();
+}
+
+if (importPresetCoverButton) {
+
+    importPresetCoverButton.addEventListener(
+        "click",
+        function () {
+
+            applyImportPreset("cover");
+        }
+    );
+}
+
+if (importPresetContainButton) {
+
+    importPresetContainButton.addEventListener(
+        "click",
+        function () {
+
+            applyImportPreset("contain");
+        }
+    );
+}
+
+
+/* ----------------------------------------------------------
+   ZOOM MANUALE
+   ---------------------------------------------------------- */
+
+if (importZoomSlider) {
+
+    importZoomSlider.addEventListener(
+        "input",
+        function () {
+
+            const newScale =
+                parseFloat(importZoomSlider.value) || 1;
+
+
+            /*
+               Manteniamo fisso il centro attuale
+               dell'immagine mentre cambia lo zoom,
+               così l'utente non perde il riferimento.
+            */
+
+            const centerX =
+                importPanX +
+                (importGifWidth * importScale) / 2;
+
+            const centerY =
+                importPanY +
+                (importGifHeight * importScale) / 2;
+
+
+            importScale = newScale;
+
+
+            importPanX =
+                centerX -
+                (importGifWidth * importScale) / 2;
+
+            importPanY =
+                centerY -
+                (importGifHeight * importScale) / 2;
+
+
+            updateImportTransformDisplay();
+        }
+    );
+}
+
+
+/* ----------------------------------------------------------
+   COLORE DI SFONDO
+   ---------------------------------------------------------- */
+
+if (importBgColorInput) {
+
+    importBgColorInput.addEventListener(
+        "input",
+        function () {
+
+            importBackgroundColor =
+                importBgColorInput.value || "#ffffff";
+
+            if (importWindow) {
+
+                importWindow.style.background =
+                    importBackgroundColor;
+            }
+        }
+    );
+}
+
+
+/* ----------------------------------------------------------
+   TRASCINAMENTO (PAN) DEL FOTOGRAMMA DA POSIZIONARE
+   ---------------------------------------------------------- */
+
+if (importDragCanvas) {
+
+    importDragCanvas.addEventListener(
+        "pointerdown",
+        function (event) {
+
+            event.preventDefault();
+
+
+            importDragState = {
+
+                startX:
+                    event.clientX,
+
+                startY:
+                    event.clientY,
+
+                originalPanX:
+                    importPanX,
+
+                originalPanY:
+                    importPanY
+            };
+
+
+            try {
+
+                importDragCanvas.setPointerCapture(
+                    event.pointerId
+                );
+            }
+            catch (error) {
+                /* ignoriamo */
+            }
+        }
+    );
+
+    importDragCanvas.addEventListener(
+        "pointermove",
+        function (event) {
+
+            if (!importDragState) {
+                return;
+            }
+
+
+            event.preventDefault();
+
+
+            const rect =
+                importWindow.getBoundingClientRect();
+
+
+            if (rect.width <= 0) {
+                return;
+            }
+
+
+            const displayScale =
+                rect.width / gifWidth;
+
+
+            const dx =
+                (event.clientX -
+                    importDragState.startX) /
+                displayScale;
+
+
+            const dy =
+                (event.clientY -
+                    importDragState.startY) /
+                displayScale;
+
+
+            importPanX =
+                importDragState.originalPanX + dx;
+
+            importPanY =
+                importDragState.originalPanY + dy;
+
+
+            updateImportTransformDisplay();
+        }
+    );
+
+    importDragCanvas.addEventListener(
+        "pointerup",
+        function (event) {
+
+            importDragState = null;
+
+
+            try {
+
+                importDragCanvas.releasePointerCapture(
+                    event.pointerId
+                );
+            }
+            catch (error) {
+                /* ignoriamo */
+            }
+        }
+    );
+
+    importDragCanvas.addEventListener(
+        "pointercancel",
+        function () {
+
+            importDragState = null;
+        }
+    );
+}
+
+
+/* ----------------------------------------------------------
+   ANNULLA IMPORT
+   ---------------------------------------------------------- */
+
+function closeImportWorkspace() {
+
+    importFrames = [];
+
+    importGifWidth = 0;
+    importGifHeight = 0;
+
+    importPreviewOverrideIndex = null;
+
+    importDragState = null;
+
+
+    if (importWorkspace) {
+
+        importWorkspace.style.display = "none";
+    }
+}
+
+if (importCancelButton) {
+
+    importCancelButton.addEventListener(
+        "click",
+        function () {
+
+            closeImportWorkspace();
+        }
+    );
+}
+
+
+/* ----------------------------------------------------------
+   CONFERMA: ACCODA I FOTOGRAMMI TRASFORMATI
+   ---------------------------------------------------------- */
+
+if (importConfirmButton) {
+
+    importConfirmButton.addEventListener(
+        "click",
+        function () {
+
+            confirmImportAppend();
+        }
+    );
+}
+
+function confirmImportAppend() {
+
+    if (importFrames.length === 0) {
+
+        alert(
+            "Nessuna GIF da accodare."
+        );
+
+        return;
+    }
+
+
+    pushUndoSnapshot();
+
+
+    const drawWidth =
+        importGifWidth * importScale;
+
+    const drawHeight =
+        importGifHeight * importScale;
+
+
+    for (
+        let i = 0;
+        i < importFrames.length;
+        i++
+    ) {
+
+        const sourceFrame =
+            importFrames[i];
+
+
+        const outCanvas =
+            document.createElement("canvas");
+
+
+        outCanvas.width =
+            gifWidth;
+
+        outCanvas.height =
+            gifHeight;
+
+
+        const ctx =
+            outCanvas.getContext("2d");
+
+
+        /*
+           Riempimento di sfondo: copre le zone
+           scoperte quando il fotogramma importato
+           è più piccolo della finestra di GIF1.
+        */
+
+        ctx.fillStyle =
+            importBackgroundColor || "#ffffff";
+
+        ctx.fillRect(
+            0,
+            0,
+            gifWidth,
+            gifHeight
+        );
+
+
+        /*
+           Disegno del fotogramma di GIF2 con la
+           stessa posizione/zoom scelti dall'utente.
+
+           Se il fotogramma è più grande della
+           finestra, la parte eccedente viene
+           semplicemente tagliata (il canvas di
+           destinazione ha dimensioni fisse).
+        */
+
+        ctx.drawImage(
+            sourceFrame.canvas,
+            0,
+            0,
+            importGifWidth,
+            importGifHeight,
+            importPanX,
+            importPanY,
+            drawWidth,
+            drawHeight
+        );
+
+
+        composedFrames.push(
+            {
+
+                canvas: outCanvas,
+
+                delay:
+                    normalizeDelay(
+                        sourceFrame.delay
+                    ),
+
+                disposalType: 0
+            }
+        );
+    }
+
+
+    closeImportWorkspace();
+
+
+    renderFramesGrid();
+
+    updateFrameCount();
+
+    updateCropPreview();
+
+    updateSpeedPreview();
+}
 
 
 /* ============================================================

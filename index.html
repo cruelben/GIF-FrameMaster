@@ -382,6 +382,75 @@
         }
 
         /* =====================================================
+           IMPORT WORKSPACE (accodamento seconda GIF)
+        ===================================================== */
+
+        #import-workspace {
+            display: none;
+        }
+
+        .import-layout {
+            display: grid;
+
+            grid-template-columns:
+                minmax(400px, 1fr)
+                280px;
+
+            gap: 20px;
+        }
+
+        .import-preview-outer {
+            min-height: 450px;
+
+            background: #0b1120;
+
+            border: 1px solid #374151;
+            border-radius: 10px;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            overflow: hidden;
+
+            position: relative;
+        }
+
+        /*
+            Finestra fissa: rappresenta le dimensioni
+            della GIF principale già caricata.
+            Il colore di sfondo viene impostato da app.js.
+        */
+
+        #import-window {
+            position: relative;
+
+            overflow: hidden;
+
+            background: #ffffff;
+
+            border: 1px dashed #60a5fa;
+        }
+
+        /*
+            Fotogramma della seconda GIF: trascinabile
+            e ridimensionabile (zoom) dentro la finestra.
+        */
+
+        #import-drag-canvas {
+            position: absolute;
+
+            left: 0;
+            top: 0;
+
+            cursor: move;
+
+            touch-action: none;
+
+            image-rendering: auto;
+        }
+
+        /* =====================================================
            CROP WORKSPACE
         ===================================================== */
 
@@ -502,7 +571,7 @@
         }
 
         /* =====================================================
-           CROP CONTROLS
+           CROP CONTROLS (riutilizzati anche per l'import)
         ===================================================== */
 
         .crop-controls {
@@ -564,6 +633,20 @@
             line-height: 1.5;
 
             margin-top: 15px;
+        }
+
+        input[type="color"] {
+            width: 42px;
+            height: 30px;
+
+            padding: 2px;
+
+            border: 1px solid #4b5563;
+            border-radius: 6px;
+
+            background: #111827;
+
+            cursor: pointer;
         }
 
         /* =====================================================
@@ -666,11 +749,13 @@
 
         @media (max-width: 900px) {
 
-            .crop-layout {
+            .crop-layout,
+            .import-layout {
                 grid-template-columns: 1fr;
             }
 
-            .crop-preview {
+            .crop-preview,
+            .import-preview-outer {
                 min-height: 350px;
             }
         }
@@ -791,6 +876,24 @@
             <!-- TOOLBAR -->
 
             <div class="toolbar">
+
+                <button
+                    id="add-gif-queue"
+                    class="primary"
+                    type="button"
+                    title="Accoda i fotogrammi di un'altra GIF alla fine di questa"
+                >
+                    ➕ Aggiungi GIF in coda
+                </button>
+
+                <input
+                    type="file"
+                    id="import-gif-file"
+                    accept=".gif,image/gif"
+                    style="display:none;"
+                >
+
+                <div class="separator"></div>
 
                 <button
                     id="select-all"
@@ -939,6 +1042,188 @@
 
 
         <!-- =================================================
+             AGGIUNTA SECONDA GIF (accodamento)
+        ================================================== -->
+
+        <section
+            class="card"
+            id="import-workspace"
+        >
+
+            <h2 class="card-title">
+                3. Aggiungi una GIF in coda
+            </h2>
+
+
+            <div class="import-layout">
+
+
+                <!-- PREVIEW / POSIZIONAMENTO -->
+
+                <div class="import-preview-outer">
+
+                    <div id="import-window">
+
+                        <canvas
+                            id="import-drag-canvas"
+                        ></canvas>
+
+                    </div>
+
+                </div>
+
+
+                <!-- CONTROLLI -->
+
+                <div class="crop-controls">
+
+                    <div class="control-title">
+                        Posiziona il fotogramma
+                    </div>
+
+
+                    <div
+                        class="inline-control"
+                        style="margin-bottom:14px;"
+                    >
+
+                        <label for="import-preview-frame">
+                            Fotogramma:
+                        </label>
+
+                        <input
+                            type="number"
+                            id="import-preview-frame"
+                            min="1"
+                            value="1"
+                            style="width:65px; padding:6px; border-radius:6px; border:1px solid #4b5563; background:#1f2937; color:#e5e7eb;"
+                        >
+
+                        <button
+                            id="import-preview-refresh"
+                            type="button"
+                            title="Aggiorna anteprima"
+                        >
+                            ⟳
+                        </button>
+
+                    </div>
+
+
+                    <div
+                        class="inline-control"
+                        style="margin-bottom:14px;"
+                    >
+
+                        <label for="import-zoom">
+                            Zoom
+                        </label>
+
+                        <input
+                            type="range"
+                            id="import-zoom"
+                            min="0.05"
+                            max="5"
+                            step="0.01"
+                            value="1"
+                        >
+
+                    </div>
+
+
+                    <div
+                        class="inline-control"
+                        style="margin-bottom:14px;"
+                    >
+
+                        <label for="import-bgcolor">
+                            Colore di sfondo
+                        </label>
+
+                        <input
+                            type="color"
+                            id="import-bgcolor"
+                            value="#ffffff"
+                        >
+
+                    </div>
+
+
+                    <div
+                        class="toolbar"
+                        style="margin-bottom:14px;"
+                    >
+
+                        <button
+                            id="import-preset-cover"
+                            type="button"
+                        >
+                            Adatta riempiendo
+                        </button>
+
+                        <button
+                            id="import-preset-contain"
+                            type="button"
+                        >
+                            Adatta con margini
+                        </button>
+
+                    </div>
+
+
+                    <div
+                        class="toolbar"
+                        style="margin-bottom:0;"
+                    >
+
+                        <button
+                            id="import-confirm"
+                            class="success"
+                            type="button"
+                        >
+                            ✔ Conferma e accoda
+                        </button>
+
+                        <button
+                            id="import-cancel"
+                            class="danger"
+                            type="button"
+                        >
+                            Annulla
+                        </button>
+
+                    </div>
+
+
+                    <div class="crop-help">
+
+                        Trascina l'immagine per posizionarla
+                        e usa lo zoom per ingrandirla o
+                        rimpicciolirla.
+
+                        <br><br>
+
+                        L'area visibile corrisponde alle
+                        dimensioni della GIF già caricata
+                        (<strong id="import-target-dims">-</strong>),
+                        che restano fisse.
+
+                        <br><br>
+
+                        I nuovi fotogrammi verranno accodati
+                        dopo quelli già presenti, mantenendo
+                        i propri tempi originali.
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
              CROP
         ================================================== -->
 
@@ -948,7 +1233,7 @@
         >
 
             <h2 class="card-title">
-                3. Ritaglio GIF
+                4. Ritaglio GIF
             </h2>
 
 
@@ -1145,7 +1430,7 @@
         >
 
             <h2 class="card-title">
-                4. Esporta GIF
+                5. Esporta GIF
             </h2>
 
 
