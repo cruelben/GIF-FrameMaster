@@ -1,205 +1,191 @@
-# GIF Frame Master
+GIF Frame Master
+An advanced, browser-based GIF editor — frame-by-frame management, visual crop, resize, multi-GIF merge, and Gifsicle-powered optimization.
 
-> A powerful browser-based GIF editor with frame-by-frame control, visual crop, frame reordering, GIF appending, duplicate detection, and custom export.
+https://img.shields.io/badge/License-MIT-yellow.svg
+https://img.shields.io/badge/Manifest-V3-blue.svg
+https://img.shields.io/badge/dependencies-none-brightgreen.svg
 
-![Status](https://img.shields.io/badge/status-active-brightgreen)
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Made with](https://img.shields.io/badge/made%20with-vanilla%20JS-yellow)
+✨ Features
+Frame management — grid of thumbnails, multi-selection, drag & drop reorder, undo
 
----
+Duplicate detection — configurable threshold to find and mark similar frames
 
-## 📖 Overview
+Batch operations — remove 1 every N frames, invert selection, keep/remove selected
 
-**GIF Frame Master** is a lightweight, dependency-free (except for two decoding/encoding libraries) web app and Chrome extension for editing animated GIFs directly in the browser.
+Animated preview — playback of the current active frames with their real delays
 
-Unlike most online GIF editors, everything runs **locally** — no uploads, no servers, no tracking. Just open the page and start editing.
+Crop — visual rectangle with draggable handles and corner resize
 
-### Key features
+Resize — editable width/height, aspect ratio lock, quick presets (100/75/50/25%), scale slider
 
-- 🎞️ **Frame-by-frame management** — select, reorder, remove
-- 🖱️ **Drag & drop reordering** — move single frames or whole selections
-- 🔍 **Duplicate detection** — find near-identical consecutive frames with adjustable threshold
-- ✂️ **Visual crop** — drag a rectangle to crop every frame at once
-- ➕ **Append multiple GIFs** — queue a second GIF, position and scale it visually, then merge
-- 🎬 **Animated preview** — real-time preview with original delays before exporting
-- ⚡ **Speed control** — slow down or speed up the whole animation
-- 🔄 **Ping-pong effect** — forward-then-backward playback
-- 🎚️ **Quality / size slider** — trade off between file size and quality
-- ↩️ **Undo** — up to 20 actions reversible
-- 🌍 **English UI** — clean, minimal, dark theme
+Multi-GIF merge — append a second GIF to the sequence with position/zoom/background controls
 
----
+Export with Gifsicle — real GIF optimization via WebAssembly (dirty rectangle, per-frame palette, LZW tuning)
 
-## 🚀 Installation
+Optimization presets — Lossless / Light / Balanced / Aggressive / Extreme / Custom
 
-### Option 1 — Use it as a web app
+Colors control — palette size 256 / 128 / 64 / 32
 
-1. Download or clone this repository:
-   ```bash
-   git clone https://github.com/cruelben/GIF-FrameMaster.git
-   ```
-2. Open `index.html` in any modern browser (Chrome, Edge, Firefox, Brave).
-3. That's it. No build step, no server required.
+Optional dithering
 
-### Option 2 — Install as a Chrome extension
+Comparison table — Original vs Edited vs Optimized (size, dimensions, frames, duration)
 
-1. Clone or download this repository.
-2. Open Chrome and go to `chrome://extensions/`.
-3. Enable **Developer mode** (top-right toggle).
-4. Click **Load unpacked** and select the folder of this repository.
-5. The GIF Frame Master icon appears in your toolbar. Click it to open the editor in a new tab.
+Smart filename — the exported file keeps the original name with _edited suffix
 
-> Works identically on any Chromium-based browser (Edge, Brave, Opera, Vivaldi).
+Native save dialog — uses showSaveFilePicker() when available, fallback to standard download
 
----
+Robust error reporting — detailed error boxes with expandable technical details
 
-## 🎮 How to use
+🚀 Quick Start
+Option 1 — Install as a Chrome extension (recommended)
+Download or clone this repository:
 
-### 1. Load a GIF
-Click **Select GIF** and choose an animated GIF. The app decodes every frame and shows them in a grid.
+text
+git clone https://github.com/cruelben/gif-frame-master.git
+cd gif-frame-master
+Open Chrome and go to chrome://extensions
 
-### 2. Manage frames
-- **Click** a frame to select it (red border)
-- **Shift + click** to select a range
-- **Drag & drop** a selection to reorder
-- **Double-click** a frame to view it at real size in a new tab
-- Use the toolbar to: select all, deselect all, invert selection, undo, decimate (remove 1 every N), detect duplicates, remove selected from view
+Enable Developer mode (top-right toggle)
 
-### 3. Append a second GIF *(optional)*
-Click **➕ Add GIF to queue** in the Load tab, pick a second GIF, then:
-- Drag to position it inside the fixed canvas
-- Use **Zoom** to scale it
-- Choose a **background color** for uncovered areas
-- Use **Fit: cover** or **Fit: contain** presets
-- Confirm to append the frames at the end of the current sequence
+Click Load unpacked and select the folder
 
-### 4. Crop
-In the **Crop** tab, drag the rectangle to select the area you want to keep. Every frame will be cropped accordingly.
+Click the extension icon to open GIF Frame Master in a new tab
 
-### 5. Export
-In the **Export** tab:
-- Adjust **speed** (0.5x – 2x)
-- Toggle **ping-pong** effect
-- Adjust **quality/size** slider (1 = best, 20 = smallest)
-- Click **Create new GIF** and download the result
+Option 2 — Run locally from index.html
+Because of browser security restrictions on file:// URLs, WebAssembly and Web Workers may be blocked when opening index.html directly. To run the tool at full capacity, serve it through a local HTTP server:
 
----
+text
+# Using Python
+python -m http.server 8000
 
-## 🧱 Project structure
+# Or using Node.js
+npx serve
+Then open http://localhost:8000 in your browser.
 
-```
-GIF-FrameMaster/
-├── index.html          # UI: layout, tabs, styles
-├── app.js              # All application logic
-├── background.js       # Chrome extension service worker
-├── manifest.json       # Chrome extension manifest (MV3)
-├── icon.png            # Extension / header icon
-├── gifuct-js.min.js    # GIF decoder (parsing frames)
-├── gifshot.min.js      # GIF encoder (export)
+Note: the Gifsicle WASM optimizer requires an HTTP context (http:// or chrome-extension://). If you open index.html via file://, the core editing features will still work, but Gifsicle optimization may be disabled.
+
+🧭 Workflow
+The app is organized into 6 tabs:
+
+Tab	Purpose
+1. Load	Load the main GIF, or append a second one (queue)
+2. Frames	Manage frames: select, reorder, remove, dedupe, preview
+3. Queue	Position the second GIF inside the main canvas
+4. Crop	Visually crop the rectangle
+5. Resize	Scale to a new output size (with aspect-ratio lock)
+6. Export	Configure optimization and generate the final GIF
+⚙️ Optimization (Gifsicle)
+Under the hood, the raw GIF generated by gifshot is passed through gifsicle-wasm-browser — a WebAssembly port of the legendary Gifsicle CLI tool.
+
+Presets
+Level	Lossy	Colors	Dither	Notes
+Lossless	—	256	off	Dirty rectangle only, zero quality loss
+Light	20	256	off	Minimal loss, barely visible
+Balanced	40	256	off	Good compromise
+Aggressive	80	256	off	Smaller files, slight artifacts
+Extreme	80	128	off	Smallest files, visible quality loss
+The Colors and Dither controls remain editable at any time, overriding the preset values.
+
+What Gifsicle actually does
+Dirty rectangle compression — stores only the pixels that change between frames
+
+Per-frame palette optimization — picks the best palette for each frame
+
+LZW tuning — better dictionary construction
+
+Lossy quantization — merges similar colors to shrink the palette (controlled by --lossy)
+
+Color reduction — limits the palette size (controlled by --colors)
+
+Dithering — optional, trades file size for smoother gradients
+
+On a typical photographic GIF already optimized by external tools, this can reduce file size by 40–60% compared to the raw encoder output.
+
+📦 Dependencies (all bundled locally)
+Library	Purpose	File
+gifuct-js	Parse and decompress GIF frames	gifuct-js.min.js
+gifshot	Encode frames back to GIF	gifshot.min.js
+gifsicle-wasm-browser	Optimize the resulting GIF	gifsicle.min.js + gifsicle.wasm + src/worker.js
+⚠️ Important: gifsicle.min.js has been patched to expose the library globally (window.gifsicle) instead of using the ES6 export default syntax, so it can be loaded with a plain <script> tag inside a Manifest V3 extension.
+
+📁 Project Structure
+text
+gif-frame-master/
+├── manifest.json           Chrome MV3 manifest
+├── background.js           Service worker (opens index.html on icon click)
+├── index.html              Main UI (6 tabs)
+├── app.js                  All application logic
+├── icon.png                Extension icon
+├── gifuct-js.min.js        GIF decoder
+├── gifshot.min.js          GIF encoder
+├── gifsicle.min.js         Gifsicle WASM wrapper (patched)
+├── gifsicle.wasm           Gifsicle binary
+├── src/
+│   └── worker.js           Web Worker used by gifsicle
 └── README.md
-```
+🖥️ Browser Support
+Browser	Extension	Local (http://)	Local (file://)
+Chrome / Edge / Brave	✅ Full	✅ Full	⚠️ Gifsicle may not load
+Firefox	⚠️ Requires MV2/MV3 adaptations	✅ Full	⚠️ Workers may be blocked
+Safari	❌	⚠️ Partial	❌
+For best results, use a Chromium-based browser.
 
-### Architecture at a glance
+🧪 Tested Workflow
+A typical edit session:
 
-- **Decoding** — [`gifuct-js`](https://github.com/matt-way/gifuct-js) parses the GIF into raw frames + disposal metadata.
-- **Composition** — `composeAllFrames()` reconstructs each full frame by honoring disposal types 2 (clear) and 3 (restore), producing independent canvases.
-- **Editing** — selection, reorder, dedupe, crop, and append all operate on this array of `{ canvas, delay, disposalType }`.
-- **Preview** — a lightweight canvas player cycles through active frames with their real delays.
-- **Encoding** — [`gifshot`](https://github.com/yahoo/gifshot) rebuilds the final animated GIF from cropped canvas frames.
+Load the source GIF (e.g. animation.gif, 640×360, 2.02 MB)
 
-No frameworks. No bundler. Just vanilla JavaScript and the DOM.
+Remove duplicate frames using the dedupe tool (threshold 1.5%)
 
----
+Crop to the interesting region
 
-## 🛠️ Tech stack
+Resize to 50% of the cropped size
 
-| Layer | Technology |
-|-------|-----------|
-| UI | HTML5 + CSS3 (custom, no framework) |
-| Logic | Vanilla JavaScript (ES2017+) |
-| GIF decoding | gifuct-js |
-| GIF encoding | gifshot |
-| Storage (extension) | chrome.storage (reserved for future use) |
-| Manifest | Chrome Extension Manifest V3 |
+Export with Extreme preset (lossy 80, colors 128)
 
----
+The comparison table shows the size reduction (e.g. -73%)
 
-## 🗺️ Roadmap
+Download as animation_edited.gif
 
-- [x] Frame grid with multi-selection
-- [x] Drag & drop reordering
-- [x] Duplicate detection with adjustable threshold
-- [x] Visual crop
-- [x] Append GIF with position / scale / background
-- [x] Animated preview
-- [x] Speed control & ping-pong
-- [x] Robust error handling with technical details
-- [ ] Session save & restore (`chrome.storage`)
-- [ ] Export individual frames as PNG
-- [ ] Per-frame delay editing
-- [ ] Drag & drop GIF file onto the page
-- [ ] Light theme
-- [ ] Keyboard shortcuts
+🛠️ Development Notes
+The UI is a single-page HTML app with no build step.
 
----
+All logic lives in app.js (~3000 lines), organized into sections with clear comments.
 
-## 🤝 Contributing
+The tab system is powered by switchTab(name) and updateTabStates().
 
-Contributions are welcome. To contribute:
+The whole app runs client-side. No server, no tracking, no uploads.
 
-1. Fork this repository
-2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Commit your changes (`git commit -m "Add my feature"`)
-4. Push to your branch (`git push origin feature/my-feature`)
-5. Open a Pull Request
+Regenerate the patched gifsicle.min.js
+If you update the underlying library, you need to re-apply the patch:
 
-### Coding conventions
+text
+- export default gifsicle;
++ window.gifsicle = gifsicle;
+This is the only change applied to the original file.
 
-- **UI strings:** English
-- **Code comments:** Italian (author's preferred language)
-- **Style:** vanilla JS, no frameworks, no bundler
-- **Indent:** 4 spaces
-- **Naming:** camelCase for variables/functions, UPPER_SNAKE_CASE for constants
+🐛 Known Limitations
+Gifshot is not an optimizer. It rebuilds the GIF from scratch, so if you don't touch anything and export without Gifsicle, the output will likely be larger than the original.
 
-Please test your changes manually (open `index.html` in a browser or reload the unpacked extension) before submitting.
+-O2 and -O3 are not exposed — they are extremely slow on large GIFs (>10 MB) with negligible gains over -O1.
 
----
+Web Workers may be blocked in Firefox when running from file://.
 
-## 🐛 Known limitations
+Maximum output size is capped at 4000×4000 px to avoid browser freezes.
 
-- Very large GIFs (hundreds of frames at high resolution) may be slow or hit browser memory limits during export.
-- The encoder (gifshot) runs in the main thread; future versions may move to Web Workers.
-- Disposal method 3 (restore to previous) is supported but rarely used by encoders.
+📜 License
+MIT — see LICENSE for details.
 
----
+👤 Author
+Bruno (@cruelben)
 
-## 📄 License
+Surviving Cobol programmer (yes, we still exist!), cryptography systems, and tech enthusiast.
 
-This project is released under the **MIT License**. You are free to use, modify, and distribute it, including for commercial purposes.
+⭐ Acknowledgments
+Gifsicle by Eddie Kohler
 
-> The bundled libraries `gifuct-js` and `gifshot` retain their own licenses. Please refer to their respective repositories.
+gifsicle-wasm-browser by renzhezhilu
 
----
+gifuct-js by Matt Way
 
-## 👤 Author
-
-**Bruno "cruelben"**
-- 🌐 Website: [cruelben.github.io](https://cruelben.github.io/)
-- 💻 GitHub: [@cruelben](https://github.com/cruelben)
-
-> *"Surviving Cobol programmer (yes, we still exist!), cryptography systems, and tech enthusiast."*
-
----
-
-## ⭐ Show your support
-
-If GIF Frame Master saved you time, consider:
-- ⭐ Starring this repository
-- 🐛 Reporting bugs or suggesting features via [Issues](https://github.com/cruelben/GIF-FrameMaster/issues)
-- 🔀 Submitting a Pull Request
-
----
-
-<p align="center">
-  <sub>Built with care, without frameworks.</sub>
-</p>
+gifshot by Yahoo
