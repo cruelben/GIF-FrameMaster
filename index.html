@@ -232,6 +232,20 @@
             font-weight: 600;
         }
 
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+
+            gap: 12px;
+
+            margin-bottom: 15px;
+        }
+
+        .card-header .card-title {
+            margin: 0;
+        }
+
         /* =====================================================
            ERROR BOX
         ===================================================== */
@@ -496,7 +510,7 @@
         }
 
         /* =====================================================
-           ANIMATED PREVIEW
+           ANIMATED PREVIEW (tab 2)
         ===================================================== */
 
         .preview-anim {
@@ -530,6 +544,15 @@
 
             max-width: 320px;
             max-height: 240px;
+
+            width: auto;
+            height: auto;
+
+            cursor: pointer;
+        }
+
+        .preview-anim canvas:hover {
+            outline: 2px solid #60a5fa;
         }
 
         .preview-anim-info {
@@ -764,6 +787,9 @@
             max-width: 100%;
             max-height: 500px;
 
+            width: auto;
+            height: auto;
+
             background:
                 repeating-conic-gradient(
                     #d1d5db 0% 25%,
@@ -790,6 +816,17 @@
             cursor: move;
 
             z-index: 10;
+        }
+
+        #crop-selection.locked {
+            pointer-events: none;
+            border-color: #facc15;
+            background: rgba(250, 204, 21, 0.12);
+        }
+
+        #crop-selection.locked .crop-handle {
+            background: #facc15;
+            border-color: #ca8a04;
         }
 
         .crop-handle {
@@ -894,6 +931,35 @@
             margin-top: 15px;
         }
 
+        /* =====================================================
+           CROP ANIMATION PANEL
+        ===================================================== */
+
+        .crop-anim-panel {
+            margin-top: 15px;
+
+            padding-top: 15px;
+
+            border-top: 1px solid #374151;
+        }
+
+        .crop-anim-panel .control-title {
+            font-size: 13px;
+
+            margin-bottom: 10px;
+        }
+
+        .crop-anim-info {
+            margin-top: 10px;
+
+            color: #9ca3af;
+            font-size: 12px;
+        }
+
+        .crop-anim-info strong {
+            color: #e5e7eb;
+        }
+
         input[type="color"] {
             width: 42px;
             height: 30px;
@@ -944,6 +1010,9 @@
 
             max-width: 100%;
             max-height: 500px;
+
+            width: auto;
+            height: auto;
 
             background:
                 repeating-conic-gradient(
@@ -1669,9 +1738,23 @@
 
             <div class="card" id="file-card">
 
-                <h2 class="card-title" id="file-card-title">
-                    1. Load a GIF
-                </h2>
+                <div class="card-header">
+
+                    <h2 class="card-title" id="file-card-title">
+                        1. Load a GIF
+                    </h2>
+
+                    <button
+                        id="clear-all-tab1"
+                        class="danger"
+                        type="button"
+                        title="Remove everything and start over"
+                        style="display:none;"
+                    >
+                        🗑 Clear all
+                    </button>
+
+                </div>
 
                 <div class="file-area" id="file-area">
 
@@ -1852,7 +1935,10 @@
 
                 <div class="preview-anim">
 
-                    <canvas id="preview-anim-canvas"></canvas>
+                    <canvas
+                        id="preview-anim-canvas"
+                        title="Double-click to open 1:1 animated preview"
+                    ></canvas>
 
                     <div class="preview-anim-info">
 
@@ -2271,6 +2357,34 @@
 
                         </div>
 
+                        <div class="crop-anim-panel">
+
+                            <div class="control-title">
+                                Animated preview
+                            </div>
+
+                            <button
+                                id="crop-anim-toggle"
+                                class="primary"
+                                type="button"
+                            >
+                                ▶ Play
+                            </button>
+
+                            <div class="crop-anim-info">
+
+                                Frame:
+                                <strong id="crop-anim-frame">-</strong>
+
+                                <br>
+
+                                Delay:
+                                <strong id="crop-anim-delay">-</strong>
+
+                            </div>
+
+                        </div>
+
                         <div class="crop-help">
 
                             Drag the rectangle to move the
@@ -2563,8 +2677,6 @@
 
                 </div>
 
-                <!-- Gifsicle optimization panel -->
-
                 <div class="optimize-panel">
 
                     <div class="optimize-title">
@@ -2683,7 +2795,7 @@
                                 <input
                                     type="checkbox"
                                     id="optimize-dither"
-			            checked
+                                    checked
                                 >
 
                                 Dither
@@ -2743,8 +2855,6 @@
                         <pre id="export-error-technical"></pre>
                     </details>
                 </div>
-
-                <!-- EXPORT COMPARISON TABLE -->
 
                 <div
                     class="export-comparison"

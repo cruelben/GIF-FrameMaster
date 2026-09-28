@@ -53,10 +53,16 @@ let dragTargetIndex = null;
 let lastSelectedFrameIndex = null;
 
 
-/* Stato anteprima animata */
+/* Stato anteprima animata (tab 2 - frames) */
 let animTimerId = null;
 let animCurrentIndex = -1;
 let animPlaying = false;
+
+
+/* Stato anteprima animata (tab 4 - crop) */
+let cropAnimTimerId = null;
+let cropAnimCurrentIndex = -1;
+let cropAnimPlaying = false;
 
 
 /* Nome del file GIF originale (solo la prima GIF caricata) */
@@ -85,18 +91,8 @@ let resizePreviewTimer = null;
 
 /* ============================================================
    GIFSICLE - STATO
-   ============================================================
-   Mappa i livelli UI ai parametri CLI di gifsicle.
-   Vedi: gifsicle --help
+   ============================================================ */
 
-   --colors N: limita la palette a N colori (max 256 per GIF).
-   --dither:   applica dithering per ridurre il banding
-               quando si riduce la palette.
-
-   Il campo "colors" e "dither" vengono aggiunti al comando
-   in modo dinamico dalla funzione optimizeWithGifsicle(),
-   in base ai controlli UI (#optimize-colors e #optimize-dither).
-   Qui salviamo solo l'optimize level (es. "-O1") e il lossy. */
 const GIFSICLE_LEVELS = {
 
     lossless: {
@@ -138,17 +134,14 @@ const GIFSICLE_LEVELS = {
         optimize: "-O1",
         lossy: null,
         defaultColors: 256,
-        defaultDither: false
+        defaultDither: true
     }
 };
 
 
-/* Risultati intermedi per la tabella di confronto:
-   dimensioni del blob gifshot grezzo e del blob ottimizzato */
+/* Risultati intermedi per la tabella di confronto */
 let lastGifshotSizeBytes = 0;
 let lastOptimizedSizeBytes = 0;
-
-/* Se la GIF finale è stata ottimizzata con successo */
 let lastOptimizationSucceeded = false;
 
 
@@ -336,6 +329,10 @@ function switchTab(name) {
 
     if (name !== "frames" && animPlaying) {
         stopAnimPreview();
+    }
+
+    if (name !== "crop" && cropAnimPlaying) {
+        stopCropAnimPreview();
     }
 }
 
@@ -557,6 +554,7 @@ function updateFileButtonState() {
     const label = $("gif-file-label");
     const description = $("file-description");
     const cardTitle = $("file-card-title");
+    const clearAllTab1 = $("clear-all-tab1");
 
     if (!label || !description) {
         return;
@@ -581,6 +579,10 @@ function updateFileButtonState() {
         if (tab1Button) {
             tab1Button.textContent = "1. Load";
         }
+
+        if (clearAllTab1) {
+            clearAllTab1.style.display = "none";
+        }
     }
     else {
 
@@ -597,6 +599,10 @@ function updateFileButtonState() {
 
         if (tab1Button) {
             tab1Button.textContent = "1. Add";
+        }
+
+        if (clearAllTab1) {
+            clearAllTab1.style.display = "inline-block";
         }
     }
 
@@ -698,7 +704,7 @@ function formatPercentChange(newValue, oldValue) {
 
 
 /* ============================================================
-   ANTEPRIMA A GRANDEZZA REALE DI UN FOTOGRAMMA
+   ANTEPRIMA A GRANDEZZA REALE DI UN FOTOGRAMMA (singolo)
    ============================================================ */
 
 function openFramePreview(frameCanvas, index) {
@@ -737,6 +743,476 @@ function openFramePreview(frameCanvas, index) {
     img.style.imageRendering = "pixelated";
 
     body.appendChild(img);
+}
+
+
+/* ============================================================
+   ANTEPRIMA ANIMATA 1:1 IN NUOVA SCHEDA
+   ============================================================
+   Apre una nuova scheda con un player HTML che cicla i frame
+   originali (senza crop/resize). Il player ha:
+     - Canvas che scala a max 90vh (image-rendering: pixelated)
+     - Badge #N semitrasparente in alto a destra, sempre
+       visibile, con numero frame corrente in tempo reale
+     - Slider per saltare a un frame specifico
+     - Pulsante Play/Stop
+     - Selettore velocità (0.25x / 0.5x / 1x) con default 0.5x
+     - Numero frame corrente + delay sotto il canvas
+   ============================================================ */
+
+function openAnimatedPreview(frames, width, height) {
+
+    if (!frames || !frames.length) {
+        return;
+    }
+
+    if (frames.length > 200) {
+
+        const ok = confirm(
+            `This GIF has ${frames.length} frames.\n\n` +
+            `Opening the 1:1 animated preview may use a lot ` +
+            `of memory and slow down the browser.\n\n` +
+            `Continue?`
+        );
+
+        if (!ok) {
+            return;
+        }
+    }
+
+    /* Serializza i frame in data URL PNG */
+
+    const dataUrls = [];
+
+    for (let i = 0; i < frames.length; i++) {
+
+        const frame = frames[i];
+
+        if (!frame || !frame.canvas) {
+            continue;
+        }
+
+        try {
+
+            const url = frame.canvas.toDataURL("image/png");
+
+            dataUrls.push({
+                url: url,
+                delay: frame.delay || 100
+            });
+        }
+        catch (e) {
+            console.warn("Could not serialize frame", i, e);
+        }
+    }
+
+    if (!dataUrls.length) {
+        alert("No frames to preview.");
+        return;
+    }
+
+    const win = window.open("", "_blank");
+
+    if (!win) {
+
+        alert(
+            "The browser blocked the new window.\n\n" +
+            "Allow popups for this page and try again."
+        );
+
+        return;
+    }
+
+    win.document.title =
+        `Animated preview - ${width}×${height}`;
+
+    const totalFrames = dataUrls.length;
+
+    /* Costruisci il documento HTML della nuova scheda.
+       Il numero frame è SEMPRE visibile in alto a destra,
+       semitrasparente ma leggibile grazie a text-shadow.
+       Il player parte con velocità 0.5x (rallentato). */
+
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Animated preview - ${width}×${height}</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #111827;
+    color: #e5e7eb;
+    font-family: Arial, Helvetica, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+  }
+
+  /* Contenitore del canvas: relativo per posizionare
+     il badge overlay in alto a destra */
+
+  .player-stage {
+    position: relative;
+    display: inline-block;
+    max-width: 95vw;
+    max-height: 78vh;
+  }
+
+  canvas {
+    display: block;
+    max-width: 95vw;
+    max-height: 78vh;
+    width: auto;
+    height: auto;
+    background:
+      repeating-conic-gradient(
+        #d1d5db 0% 25%,
+        #ffffff 0% 50%
+      )
+      50% / 20px 20px;
+    image-rendering: pixelated;
+    border-radius: 6px;
+  }
+
+  /* Badge con il numero del frame corrente.
+     Sempre visibile sopra il canvas.
+     pointer-events: none per non intralciare click. */
+
+  .frame-number-badge {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+
+    padding: 6px 18px;
+
+    background: rgba(0, 0, 0, 0.35);
+    border-radius: 10px;
+
+    color: rgba(255, 255, 255, 0.75);
+    font-family: monospace;
+    font-size: 44px;
+    font-weight: 700;
+    letter-spacing: 1px;
+
+    text-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.85),
+      0 0 2px rgba(0, 0, 0, 0.9);
+
+    pointer-events: none;
+    user-select: none;
+
+    transition: opacity 0.2s;
+  }
+
+  /* Quando il player è in riproduzione, il numero
+     diventa più tenue per non distrarre */
+
+  .frame-number-badge.playing {
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(0, 0, 0, 0.22);
+  }
+
+  /* Slider frame */
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 95vw;
+    max-width: 900px;
+    color: #9ca3af;
+    font-size: 13px;
+  }
+
+  .slider-row input[type="range"] {
+    flex: 1;
+    accent-color: #2563eb;
+  }
+
+  .slider-row strong {
+    color: #e5e7eb;
+    min-width: 80px;
+    text-align: right;
+  }
+
+  /* Controlli Play / info frame */
+
+  .player-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 14px;
+  }
+
+  button {
+    border: none;
+    border-radius: 7px;
+    padding: 9px 18px;
+    background: #2563eb;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: 0.15s;
+  }
+
+  button:hover {
+    background: #1d4ed8;
+  }
+
+  .info {
+    color: #9ca3af;
+    font-size: 13px;
+  }
+
+  .info strong {
+    color: #e5e7eb;
+  }
+
+  /* Riga velocità con bottoni preset */
+
+  .speed-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #9ca3af;
+    font-size: 13px;
+  }
+
+  .speed-row .speed-btn {
+    background: #374151;
+    color: #e5e7eb;
+    font-weight: 600;
+    padding: 7px 14px;
+    font-size: 13px;
+  }
+
+  .speed-row .speed-btn:hover {
+    background: #4b5563;
+  }
+
+  .speed-row .speed-btn.active {
+    background: #2563eb;
+    color: #ffffff;
+  }
+</style>
+</head>
+<body>
+
+<div class="player-stage">
+  <canvas id="player"></canvas>
+
+  <div
+    class="frame-number-badge"
+    id="frameBadge"
+  >
+    #1
+  </div>
+</div>
+
+<div class="slider-row">
+  <input
+    type="range"
+    id="frameSlider"
+    min="0"
+    max="${totalFrames - 1}"
+    step="1"
+    value="0"
+  >
+  <strong id="sliderLabel">1 / ${totalFrames}</strong>
+</div>
+
+<div class="player-controls">
+  <button id="playBtn">&#9654; Play</button>
+  <div class="info">
+    Frame: <strong id="frameLabel">-</strong>
+    &nbsp;·&nbsp;
+    Delay: <strong id="delayLabel">-</strong>
+  </div>
+</div>
+
+<div class="speed-row">
+  <span>Speed:</span>
+  <button class="speed-btn" data-speed="0.25">0.25x</button>
+  <button class="speed-btn active" data-speed="0.5">0.5x</button>
+  <button class="speed-btn" data-speed="1">1x</button>
+</div>
+
+<script>
+(function() {
+
+  var framesData = ${JSON.stringify(dataUrls)};
+  var gifW = ${width};
+  var gifH = ${height};
+  var total = framesData.length;
+
+  /* Velocità di default: 0.5x (rallentato).
+     Il delay effettivo è: delay / speedMultiplier
+     Quindi con 0.5x un delay di 40ms diventa 80ms. */
+
+  var speedMultiplier = 0.5;
+
+  var canvas = document.getElementById("player");
+  var playBtn = document.getElementById("playBtn");
+  var frameLabel = document.getElementById("frameLabel");
+  var delayLabel = document.getElementById("delayLabel");
+  var slider = document.getElementById("frameSlider");
+  var sliderLabel = document.getElementById("sliderLabel");
+  var frameBadge = document.getElementById("frameBadge");
+
+  canvas.width = gifW;
+  canvas.height = gifH;
+
+  var ctx = canvas.getContext("2d");
+
+  var imgs = [];
+  var loadedCount = 0;
+  var currentIndex = 0;
+  var timerId = null;
+  var playing = false;
+
+  /* Carica tutte le immagini in memoria */
+  for (var i = 0; i < total; i++) {
+    (function(idx) {
+      var img = new Image();
+      img.onload = function() {
+        imgs[idx] = img;
+        loadedCount++;
+        if (loadedCount === total) {
+          drawFrame(0);
+        }
+      };
+      img.onerror = function() {
+        loadedCount++;
+      };
+      img.src = framesData[idx].url;
+    })(i);
+  }
+
+  /* Ridisegna il frame N e aggiorna tutti i controlli */
+
+  function drawFrame(idx) {
+    if (!imgs[idx]) {
+      return;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(imgs[idx], 0, 0);
+
+    frameLabel.textContent = (idx + 1) + " / " + total;
+    delayLabel.textContent = framesData[idx].delay + " ms";
+    sliderLabel.textContent = (idx + 1) + " / " + total;
+    slider.value = String(idx);
+
+    /* Aggiorna il badge overlay */
+
+    frameBadge.textContent = "#" + (idx + 1);
+  }
+
+  /* Programma il frame successivo applicando speedMultiplier */
+
+  function scheduleNext() {
+    var frame = framesData[currentIndex];
+    var baseDelay = frame && frame.delay ? frame.delay : 100;
+    var effectiveDelay = Math.max(
+      10,
+      Math.round(baseDelay / speedMultiplier)
+    );
+
+    timerId = setTimeout(function() {
+      currentIndex = (currentIndex + 1) % total;
+      drawFrame(currentIndex);
+      scheduleNext();
+    }, effectiveDelay);
+  }
+
+  function play() {
+    if (playing) return;
+    playing = true;
+    playBtn.innerHTML = "&#9632; Stop";
+    frameBadge.classList.add("playing");
+    scheduleNext();
+  }
+
+  function stop() {
+    playing = false;
+    if (timerId !== null) {
+      clearTimeout(timerId);
+      timerId = null;
+    }
+    playBtn.innerHTML = "&#9654; Play";
+    frameBadge.classList.remove("playing");
+  }
+
+  playBtn.addEventListener("click", function() {
+    if (playing) {
+      stop();
+    } else {
+      play();
+    }
+  });
+
+  /* Slider: salta a un frame specifico.
+     Se l'animazione è in corso, si ferma. */
+
+  slider.addEventListener("input", function() {
+    var idx = parseInt(slider.value, 10);
+    if (!isFinite(idx) || idx < 0) idx = 0;
+    if (idx >= total) idx = total - 1;
+
+    if (playing) {
+      stop();
+    }
+
+    currentIndex = idx;
+    drawFrame(idx);
+  });
+
+  /* Bottoni velocità */
+
+  var speedButtons = document.querySelectorAll(".speed-btn");
+
+  speedButtons.forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      var newSpeed = parseFloat(btn.dataset.speed);
+      if (!isFinite(newSpeed) || newSpeed <= 0) return;
+
+      speedMultiplier = newSpeed;
+
+      /* Aggiorna classe active */
+      speedButtons.forEach(function(b) {
+        b.classList.remove("active");
+      });
+      btn.classList.add("active");
+
+      /* Se sta suonando, ferma e riavvia subito
+         con la nuova velocità */
+
+      if (playing) {
+        stop();
+        play();
+      }
+    });
+  });
+
+  /* Ferma il timer se la scheda viene chiusa */
+  window.addEventListener("beforeunload", stop);
+
+})();
+<\/script>
+
+</body>
+</html>
+`;
+
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
 }
 
 
@@ -953,8 +1429,6 @@ if (fileInput) {
         }
 
 
-        /* Reset stato */
-
         selectedFrames.clear();
 
         undoStack = [];
@@ -967,7 +1441,6 @@ if (fileInput) {
 
         speedMultiplier = 1;
 
-        /* Reset risultati gifsicle */
         lastGifshotSizeBytes = 0;
         lastOptimizedSizeBytes = 0;
         lastOptimizationSucceeded = false;
@@ -988,8 +1461,6 @@ if (fileInput) {
             oldDownloadButton.remove();
         }
 
-
-        /* Salva il nome e la dimensione del file originale */
 
         originalFileName = file.name;
         originalFileSize = file.size;
@@ -1437,7 +1908,7 @@ function renderFramesGrid() {
 }
 
 /* ============================================================
-   ANTEPRIMA ANIMATA (tab 2)
+   ANTEPRIMA ANIMATA (tab 2 - frames)
    ============================================================ */
 
 const previewAnimCanvas = $("preview-anim-canvas");
@@ -1701,6 +2172,174 @@ if (previewAnimToggle) {
         }
         else {
             startAnimPreview();
+        }
+    });
+}
+
+
+/* Doppio click sul canvas di anteprima del tab 2:
+   apre la vista 1:1 animata in una nuova scheda.
+   Mostra i frame ORIGINALI (senza crop/resize). */
+
+if (previewAnimCanvas) {
+
+    previewAnimCanvas.addEventListener("dblclick", function () {
+
+        if (composedFrames.length === 0) {
+            return;
+        }
+
+        const originalFramesData = composedFrames.map(
+            function (f) { return { canvas: f.canvas, delay: f.delay }; }
+        );
+
+        openAnimatedPreview(
+            originalFramesData,
+            gifWidth,
+            gifHeight
+        );
+    });
+}
+
+
+/* ============================================================
+   ANTEPRIMA ANIMATA (tab 4 - crop)
+   ============================================================ */
+
+const cropAnimToggle = $("crop-anim-toggle");
+const cropAnimFrameLabel = $("crop-anim-frame");
+const cropAnimDelayLabel = $("crop-anim-delay");
+
+
+function drawCropFrameForPlay(frameIndex) {
+
+    if (!cropCanvas) {
+        return;
+    }
+
+    if (frameIndex < 0 || frameIndex >= composedFrames.length) {
+        return;
+    }
+
+    const frame = composedFrames[frameIndex];
+
+    if (!frame || !frame.canvas) {
+        return;
+    }
+
+    cropCanvas.width = gifWidth;
+    cropCanvas.height = gifHeight;
+
+    const ctx = cropCanvas.getContext("2d");
+
+    ctx.clearRect(0, 0, gifWidth, gifHeight);
+
+    ctx.drawImage(frame.canvas, 0, 0);
+
+    resizeCropCanvasDisplay();
+
+    updateCropSelectionDisplay();
+
+    if (cropAnimFrameLabel) {
+        cropAnimFrameLabel.textContent =
+            `${frameIndex + 1} / ${composedFrames.length}`;
+    }
+
+    if (cropAnimDelayLabel) {
+        cropAnimDelayLabel.textContent =
+            `${frame.delay} ms`;
+    }
+}
+
+
+function stopCropAnimPreview() {
+
+    if (cropAnimTimerId !== null) {
+
+        clearTimeout(cropAnimTimerId);
+
+        cropAnimTimerId = null;
+    }
+
+    cropAnimPlaying = false;
+
+    if (cropAnimToggle) {
+        cropAnimToggle.textContent = "▶ Play";
+    }
+
+    if (cropSelection) {
+        cropSelection.classList.remove("locked");
+    }
+
+    updateCropPreview();
+}
+
+
+function scheduleNextCropAnimFrame() {
+
+    if (composedFrames.length === 0) {
+        stopCropAnimPreview();
+        return;
+    }
+
+    cropAnimCurrentIndex =
+        (cropAnimCurrentIndex + 1) % composedFrames.length;
+
+    drawCropFrameForPlay(cropAnimCurrentIndex);
+
+    const frame = composedFrames[cropAnimCurrentIndex];
+
+    const delay = frame && frame.delay ? frame.delay : 100;
+
+    cropAnimTimerId = setTimeout(
+        scheduleNextCropAnimFrame,
+        delay
+    );
+}
+
+
+function startCropAnimPreview() {
+
+    if (composedFrames.length === 0) {
+        return;
+    }
+
+    stopCropAnimPreview();
+
+    cropAnimPlaying = true;
+
+    cropAnimCurrentIndex = 0;
+
+    if (cropAnimToggle) {
+        cropAnimToggle.textContent = "■ Stop";
+    }
+
+    if (cropSelection) {
+        cropSelection.classList.add("locked");
+    }
+
+    drawCropFrameForPlay(cropAnimCurrentIndex);
+
+    const frame = composedFrames[cropAnimCurrentIndex];
+
+    const delay = frame && frame.delay ? frame.delay : 100;
+
+    cropAnimTimerId = setTimeout(
+        scheduleNextCropAnimFrame,
+        delay
+    );
+}
+
+
+if (cropAnimToggle) {
+
+    cropAnimToggle.addEventListener("click", function () {
+
+        if (cropAnimPlaying) {
+            stopCropAnimPreview();
+        }
+        else {
+            startCropAnimPreview();
         }
     });
 }
@@ -2086,7 +2725,196 @@ if (removeSelectedButton) {
 
 
 /* ============================================================
-   SVUOTA TUTTO
+   FUNZIONE CONDIVISA: SVUOTA TUTTO
+   ============================================================ */
+
+function performClearAll() {
+
+    stopAnimPreview();
+    stopCropAnimPreview();
+
+    originalFrames = [];
+    composedFrames = [];
+
+    originalFileName = "";
+    originalFileSize = 0;
+
+    selectedFrames.clear();
+
+    undoStack = [];
+
+    lastSelectedFrameIndex = null;
+
+    gifWidth = 0;
+    gifHeight = 0;
+
+    cropRect = { x: 0, y: 0, width: 0, height: 0 };
+
+    cropInteraction = null;
+    cropPreviewOverrideIndex = null;
+
+    resizeWidth = 0;
+    resizeHeight = 0;
+    resizeAspectRatio = 1;
+    resizeLockAspect = true;
+
+    speedMultiplier = 1;
+
+    currentExportData = null;
+
+    animCurrentIndex = -1;
+    cropAnimCurrentIndex = -1;
+
+    lastGifshotSizeBytes = 0;
+    lastOptimizedSizeBytes = 0;
+    lastOptimizationSucceeded = false;
+
+    importFrames = [];
+    importGifWidth = 0;
+    importGifHeight = 0;
+    importPreviewOverrideIndex = null;
+    importDragState = null;
+
+    const speedSliderReset = $("speed-slider");
+
+    if (speedSliderReset) {
+        speedSliderReset.value = "1";
+    }
+
+    const exportQualityReset = $("export-quality");
+
+    if (exportQualityReset) {
+        exportQualityReset.value = "10";
+    }
+
+    updateExportQualityLabel();
+
+    const pingPongReset = $("pingpong-toggle");
+
+    if (pingPongReset) {
+        pingPongReset.checked = false;
+    }
+
+    const thumbReset = $("thumb-size-slider");
+
+    if (thumbReset) {
+
+        thumbReset.value = "80";
+
+        document.documentElement.style.setProperty(
+            "--thumb-size",
+            "80px"
+        );
+
+        updateThumbSizeLabel();
+    }
+
+    const resizeWidthInputReset = $("resize-width");
+    const resizeHeightInputReset = $("resize-height");
+    const resizeLockInputReset = $("resize-lock");
+
+    if (resizeWidthInputReset) resizeWidthInputReset.value = "0";
+    if (resizeHeightInputReset) resizeHeightInputReset.value = "0";
+    if (resizeLockInputReset) resizeLockInputReset.checked = true;
+
+    updateResizeScaleFromFields();
+
+    if (exportStatus) exportStatus.textContent = "";
+
+    if (exportPreview) {
+
+        exportPreview.src = "";
+
+        exportPreview.style.display = "none";
+    }
+
+    hideExportComparison();
+
+    if (frameCount) {
+        frameCount.textContent = "0 frames";
+    }
+
+    if (gifDimensions) {
+        gifDimensions.textContent = "-";
+    }
+
+    const oldDownloadButton = $("download-gif");
+
+    if (oldDownloadButton) {
+        oldDownloadButton.remove();
+    }
+
+    if (framesGrid) {
+        framesGrid.innerHTML = "";
+    }
+
+    if (previewAnimCanvas) {
+
+        previewAnimCanvas.width = 1;
+        previewAnimCanvas.height = 1;
+        previewAnimCanvas.style.width = "1px";
+        previewAnimCanvas.style.height = "1px";
+    }
+
+    if (previewAnimFrameLabel) {
+        previewAnimFrameLabel.textContent = "-";
+    }
+
+    if (previewAnimDelayLabel) {
+        previewAnimDelayLabel.textContent = "-";
+    }
+
+    if (cropSelection) {
+        cropSelection.style.display = "none";
+        cropSelection.classList.remove("locked");
+    }
+
+    if (cropAnimFrameLabel) {
+        cropAnimFrameLabel.textContent = "-";
+    }
+
+    if (cropAnimDelayLabel) {
+        cropAnimDelayLabel.textContent = "-";
+    }
+
+    const resizePreviewCanvasReset = $("resize-preview-canvas");
+
+    if (resizePreviewCanvasReset) {
+
+        resizePreviewCanvasReset.width = 1;
+        resizePreviewCanvasReset.height = 1;
+        resizePreviewCanvasReset.style.width = "1px";
+        resizePreviewCanvasReset.style.height = "1px";
+    }
+
+    const resizeCurrentSizeReset = $("resize-current-size");
+
+    if (resizeCurrentSizeReset) {
+        resizeCurrentSizeReset.textContent = "-";
+    }
+
+    if (fileInput) {
+        fileInput.value = "";
+    }
+
+    hideErrorBox("load-error-box");
+    hideErrorBox("import-error-box");
+    hideErrorBox("export-error-box");
+
+    updateFileButtonState();
+
+    updateSpeedPreview();
+
+    updateExportSourceLabel();
+
+    updateTabStates();
+
+    switchTab("load");
+}
+
+
+/* ============================================================
+   SVUOTA TUTTO (tab 2)
    ============================================================ */
 
 const clearAllButton = $("clear-all");
@@ -2112,175 +2940,36 @@ if (clearAllButton) {
             return;
         }
 
-        stopAnimPreview();
+        performClearAll();
+    });
+}
 
-        originalFrames = [];
-        composedFrames = [];
 
-        originalFileName = "";
-        originalFileSize = 0;
+/* ============================================================
+   SVUOTA TUTTO (tab 1)
+   ============================================================ */
 
-        selectedFrames.clear();
+const clearAllTab1Button = $("clear-all-tab1");
 
-        undoStack = [];
+if (clearAllTab1Button) {
 
-        lastSelectedFrameIndex = null;
+    clearAllTab1Button.addEventListener("click", function () {
 
-        gifWidth = 0;
-        gifHeight = 0;
-
-        cropRect = { x: 0, y: 0, width: 0, height: 0 };
-
-        cropInteraction = null;
-        cropPreviewOverrideIndex = null;
-
-        resizeWidth = 0;
-        resizeHeight = 0;
-        resizeAspectRatio = 1;
-        resizeLockAspect = true;
-
-        speedMultiplier = 1;
-
-        currentExportData = null;
-
-        animCurrentIndex = -1;
-
-        lastGifshotSizeBytes = 0;
-        lastOptimizedSizeBytes = 0;
-        lastOptimizationSucceeded = false;
-
-        importFrames = [];
-        importGifWidth = 0;
-        importGifHeight = 0;
-        importPreviewOverrideIndex = null;
-        importDragState = null;
-
-        const speedSliderReset = $("speed-slider");
-
-        if (speedSliderReset) {
-            speedSliderReset.value = "1";
+        if (composedFrames.length === 0) {
+            return;
         }
 
-        const exportQualityReset = $("export-quality");
+        const ok = confirm(
+            "Clear everything?\n\n" +
+            "All frames, crop, speed, and previews will " +
+            "be removed."
+        );
 
-        if (exportQualityReset) {
-            exportQualityReset.value = "10";
+        if (!ok) {
+            return;
         }
 
-        updateExportQualityLabel();
-
-        const pingPongReset = $("pingpong-toggle");
-
-        if (pingPongReset) {
-            pingPongReset.checked = false;
-        }
-
-        const thumbReset = $("thumb-size-slider");
-
-        if (thumbReset) {
-
-            thumbReset.value = "80";
-
-            document.documentElement.style.setProperty(
-                "--thumb-size",
-                "80px"
-            );
-
-            updateThumbSizeLabel();
-        }
-
-        const resizeWidthInputReset = $("resize-width");
-        const resizeHeightInputReset = $("resize-height");
-        const resizeLockInputReset = $("resize-lock");
-
-        if (resizeWidthInputReset) resizeWidthInputReset.value = "0";
-        if (resizeHeightInputReset) resizeHeightInputReset.value = "0";
-        if (resizeLockInputReset) resizeLockInputReset.checked = true;
-
-        updateResizeScaleFromFields();
-
-        if (exportStatus) exportStatus.textContent = "";
-
-        if (exportPreview) {
-
-            exportPreview.src = "";
-
-            exportPreview.style.display = "none";
-        }
-
-        hideExportComparison();
-
-        if (frameCount) {
-            frameCount.textContent = "0 frames";
-        }
-
-        if (gifDimensions) {
-            gifDimensions.textContent = "-";
-        }
-
-        const oldDownloadButton = $("download-gif");
-
-        if (oldDownloadButton) {
-            oldDownloadButton.remove();
-        }
-
-        if (framesGrid) {
-            framesGrid.innerHTML = "";
-        }
-
-        if (previewAnimCanvas) {
-
-            previewAnimCanvas.width = 1;
-            previewAnimCanvas.height = 1;
-            previewAnimCanvas.style.width = "1px";
-            previewAnimCanvas.style.height = "1px";
-        }
-
-        if (previewAnimFrameLabel) {
-            previewAnimFrameLabel.textContent = "-";
-        }
-
-        if (previewAnimDelayLabel) {
-            previewAnimDelayLabel.textContent = "-";
-        }
-
-        if (cropSelection) {
-            cropSelection.style.display = "none";
-        }
-
-        const resizePreviewCanvasReset = $("resize-preview-canvas");
-
-        if (resizePreviewCanvasReset) {
-
-            resizePreviewCanvasReset.width = 1;
-            resizePreviewCanvasReset.height = 1;
-            resizePreviewCanvasReset.style.width = "1px";
-            resizePreviewCanvasReset.style.height = "1px";
-        }
-
-        const resizeCurrentSizeReset = $("resize-current-size");
-
-        if (resizeCurrentSizeReset) {
-            resizeCurrentSizeReset.textContent = "-";
-        }
-
-        if (fileInput) {
-            fileInput.value = "";
-        }
-
-        hideErrorBox("load-error-box");
-        hideErrorBox("import-error-box");
-        hideErrorBox("export-error-box");
-
-        updateFileButtonState();
-
-        updateSpeedPreview();
-
-        updateExportSourceLabel();
-
-        updateTabStates();
-
-        switchTab("load");
+        performClearAll();
     });
 }
 
@@ -2349,6 +3038,10 @@ function getCropPreviewFrameIndex() {
 function updateCropPreview() {
 
     if (!cropCanvas) {
+        return;
+    }
+
+    if (cropAnimPlaying) {
         return;
     }
 
@@ -3045,7 +3738,6 @@ const optimizeColorsSelect = $("optimize-colors");
 const optimizeDitherInput = $("optimize-dither");
 
 
-/* Abilita/disabilita i campi in base alla checkbox principale */
 function updateOptimizeFieldsState() {
 
     if (!optimizeToggle || !optimizeFields) {
@@ -3071,11 +3763,6 @@ if (optimizeToggle) {
 }
 
 
-/* Sincronizza i campi UI con il livello selezionato.
-   Ogni livello ha: optimize, lossy, defaultColors, defaultDither.
-   Se l'utente sceglie un livello predefinito, riempiamo
-   Lossy, Colors e Dither con i valori del livello.
-   Se sceglie "custom", lasciamo i campi liberi. */
 function updateFieldsFromLevel() {
 
     if (!optimizeLevelSelect) {
@@ -3094,13 +3781,11 @@ function updateFieldsFromLevel() {
 
         if (level === "lossless") {
 
-            /* Lossless: nessun valore lossy, campo vuoto */
             optimizeLossyInput.disabled = true;
             optimizeLossyInput.value = "";
         }
         else if (level === "custom") {
 
-            /* Custom: l'utente sceglie, riabilito il campo */
             optimizeLossyInput.disabled = false;
 
             if (!optimizeLossyInput.value) {
@@ -3109,7 +3794,6 @@ function updateFieldsFromLevel() {
         }
         else {
 
-            /* Livelli predefiniti: uso il valore della mappa */
             optimizeLossyInput.disabled = false;
 
             if (config.lossy !== null && config.lossy !== undefined) {
@@ -3162,6 +3846,10 @@ if (cropSelection) {
         "pointerdown",
         function (event) {
 
+            if (cropAnimPlaying) {
+                return;
+            }
+
             event.preventDefault();
             event.stopPropagation();
 
@@ -3192,15 +3880,15 @@ if (cropSelection) {
     );
 
 
-    /* ========================================================
-       CROP - POINTER MOVE
-       ======================================================== */
-
     cropSelection.addEventListener(
         "pointermove",
         function (event) {
 
             if (!cropInteraction) {
+                return;
+            }
+
+            if (cropAnimPlaying) {
                 return;
             }
 
@@ -3326,10 +4014,6 @@ if (cropSelection) {
     );
 
 
-    /* ========================================================
-       POINTER UP / CANCEL
-       ======================================================== */
-
     cropSelection.addEventListener(
         "pointerup",
         function (event) {
@@ -3341,6 +4025,10 @@ if (cropSelection) {
             }
             catch (error) {
                 /* ignoriamo */
+            }
+
+            if (cropAnimPlaying) {
+                return;
             }
 
             syncResizeTabFromCrop();
@@ -3368,7 +4056,7 @@ window.addEventListener(
         updateCropSelectionDisplay();
         resizeImportWindowDisplay();
         updateImportTransformDisplay();
-        resizeAnimPreviewCanvas();
+        updateAnimPreview();
         applyResizePreviewDisplaySize();
     }
 );
@@ -4277,20 +4965,6 @@ function getBlobSizeBytes(blob) {
 
 /* ============================================================
    GIFSICLE - OTTIMIZZAZIONE
-   ============================================================
-   Passa il blob GIF attraverso gifsicle WASM e restituisce
-   un nuovo blob ottimizzato. Ritorna null in caso di errore.
-
-   Il comando viene costruito a partire da:
-     - level (GIFSICLE_LEVELS): optimize
-     - colors  (#optimize-colors): 32, 64, 128, 256
-     - dither  (#optimize-dither): on/off
-     - lossy   (#optimize-lossy): valore numerico
-
-   La sintassi di gifsicle-wasm-browser richiede:
-     - Il comando come singola stringa
-     - Il file di input SENZA path (solo "input.gif")
-     - L'output deve essere in /out/
    ============================================================ */
 
 async function optimizeWithGifsicle(inputBlob, options) {
@@ -4304,16 +4978,12 @@ async function optimizeWithGifsicle(inputBlob, options) {
         );
     }
 
-    /* Costruisce il comando CLI per gifsicle */
-
     const cmdParts = [];
 
-    /* 1. Optimize level (-O1) */
     if (options.optimize) {
         cmdParts.push(options.optimize);
     }
 
-    /* 2. Colors */
     if (
         options.colors !== null &&
         options.colors !== undefined &&
@@ -4322,12 +4992,10 @@ async function optimizeWithGifsicle(inputBlob, options) {
         cmdParts.push("--colors " + parseInt(options.colors, 10));
     }
 
-    /* 3. Dither */
     if (options.dither) {
         cmdParts.push("--dither");
     }
 
-    /* 4. Lossy value */
     if (options.lossy !== null && options.lossy !== undefined) {
 
         const lossyValue = parseInt(options.lossy, 10);
@@ -4337,10 +5005,6 @@ async function optimizeWithGifsicle(inputBlob, options) {
         }
     }
 
-    /* Comando completo: parametri + file input + output
-       Nota: input.gif SENZA path (gifsicle-wasm-browser
-       lo mette già in /input internamente). */
-
     const command =
         cmdParts.join(" ") +
         " input.gif -o /out/output.gif";
@@ -4348,8 +5012,6 @@ async function optimizeWithGifsicle(inputBlob, options) {
 
     console.log("Gifsicle command:", command);
 
-
-    /* Chiamata alla libreria */
 
     const result = await gifsicle.run({
         input: [{
@@ -4757,8 +5419,6 @@ async function exportGif() {
         return;
     }
 
-    /* Frame attivi */
-
     const activeIndices = [];
 
     for (let i = 0; i < composedFrames.length; i++) {
@@ -4807,8 +5467,6 @@ async function exportGif() {
         return;
     }
 
-    /* Ping-pong */
-
     const pingPongToggle = $("pingpong-toggle");
 
     const usePingPong = pingPongToggle
@@ -4825,8 +5483,6 @@ async function exportGif() {
         exportIndices =
             activeIndices.concat(reversedMiddle);
     }
-
-    /* Stato UI */
 
     if (exportButton) {
 
@@ -4958,10 +5614,6 @@ async function exportGif() {
             }
         ).then(async function (gifshotDataUrl) {
 
-            /* ---------------------------------------------
-               GIFSHOT HA PRODOTTO LA GIF GREZZA
-               --------------------------------------------- */
-
             const gifshotSizeBytes =
                 getDataUrlSizeBytes(gifshotDataUrl);
 
@@ -4972,10 +5624,6 @@ async function exportGif() {
                 formatBytes(gifshotSizeBytes)
             );
 
-
-            /* ---------------------------------------------
-               OTTIMIZZAZIONE CON GIFSICLE
-               --------------------------------------------- */
 
             let finalDataUrl = gifshotDataUrl;
             let finalSizeBytes = gifshotSizeBytes;
@@ -5010,12 +5658,6 @@ async function exportGif() {
 
                     try {
 
-                        /* --------- Legge i parametri dalla UI ---------
-                           Unica fonte di verità: i controlli UI.
-                           I default dei livelli sono usati SOLO
-                           in updateFieldsFromLevel() per popolare
-                           la UI quando si sceglie un preset. */
-
                         const level =
                             optimizeLevelSelect
                                 ? optimizeLevelSelect.value
@@ -5025,7 +5667,6 @@ async function exportGif() {
                             GIFSICLE_LEVELS[level] ||
                             GIFSICLE_LEVELS.balanced;
 
-                        /* Lossy: solo dal campo input */
                         let lossyValue = null;
 
                         if (optimizeLossyInput) {
@@ -5037,7 +5678,6 @@ async function exportGif() {
                             }
                         }
 
-                        /* Colors: solo dal select UI */
                         let colorsValue = 256;
 
                         if (optimizeColorsSelect) {
@@ -5051,15 +5691,12 @@ async function exportGif() {
                             }
                         }
 
-                        /* Dither: solo dalla checkbox UI */
                         let ditherEnabled = false;
 
                         if (optimizeDitherInput) {
                             ditherEnabled =
                                 optimizeDitherInput.checked === true;
                         }
-
-                        /* Config finale passata alla funzione */
 
                         const finalConfig = {
                             optimize: config.optimize,
@@ -5153,10 +5790,6 @@ async function exportGif() {
                 }
             }
 
-
-            /* ---------------------------------------------
-               AGGIORNA PREVIEW E DOWNLOAD
-               --------------------------------------------- */
 
             currentExportData = finalDataUrl;
 
@@ -5331,6 +5964,8 @@ resizeAnimPreviewCanvas();
 
 updateExportSourceLabel();
 
+updateFileButtonState();
+
 
 /* ============================================================
    LOG DI DEBUG
@@ -5370,3 +6005,4 @@ console.log("========================================");
 /* ============================================================
    FINE APP.JS
    ============================================================ */
+
