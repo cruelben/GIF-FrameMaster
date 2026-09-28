@@ -33,10 +33,10 @@
 ### Option 1 — Install as a Chrome extension (recommended)
 
 1. Download or clone this repository:
-git clone https://github.com/cruelben/gif-frame-master.git
-cd gif-frame-master
-
-text
+   ```bash
+   git clone https://github.com/cruelben/gif-frame-master.git
+   cd gif-frame-master
+   ```
 2. Open Chrome and go to `chrome://extensions`
 3. Enable **Developer mode** (top-right toggle)
 4. Click **Load unpacked** and select the folder
@@ -45,17 +45,20 @@ text
 ### Option 2 — Run locally from `index.html`
 
 Because of browser security restrictions on `file://` URLs, **WebAssembly and Web Workers may be blocked** when opening `index.html` directly. To run the tool at full capacity, serve it through a local HTTP server:
-Using Python
+
+Using Python:
+```bash
 python -m http.server 8000
+```
 
-Or using Node.js
+Or using Node.js:
+```bash
 npx serve
-
-text
+```
 
 Then open `http://localhost:8000` in your browser.
 
-**Note:** the Gifsicle WASM optimizer requires an HTTP context (`http://` or `chrome-extension://`). If you open `index.html` via `file://`, the core editing features will still work, but Gifsicle optimization may be disabled.
+> **Note:** The Gifsicle WASM optimizer requires an HTTP context (`http://` or `chrome-extension://`). If you open `index.html` via `file://`, the core editing features will still work, but Gifsicle optimization may be disabled.
 
 ---
 
@@ -111,26 +114,27 @@ On a typical photographic GIF already optimized by external tools, this can redu
 | [gifshot](https://github.com/yahoo/gifshot) | Encode frames back to GIF | `gifshot.min.js` |
 | [gifsicle-wasm-browser](https://github.com/renzhezhilu/gifsicle-wasm-browser) | Optimize the resulting GIF | `gifsicle.min.js` + `gifsicle.wasm` + `src/worker.js` |
 
-⚠️ **Important:** `gifsicle.min.js` has been patched to expose the library globally (`window.gifsicle`) instead of using the ES6 `export default` syntax, so it can be loaded with a plain `<script>` tag inside a Manifest V3 extension.
+> ⚠️ **Important:** `gifsicle.min.js` has been patched to expose the library globally (`window.gifsicle`) instead of using the ES6 `export default` syntax, so it can be loaded with a plain `<script>` tag inside a Manifest V3 extension.
 
 ---
 
 ## 📁 Project Structure
-gif-frame-master/
-├── manifest.json Chrome MV3 manifest
-├── background.js Service worker (opens index.html on icon click)
-├── index.html Main UI (6 tabs)
-├── app.js All application logic
-├── icon.png Extension icon
-├── gifuct-js.min.js GIF decoder
-├── gifshot.min.js GIF encoder
-├── gifsicle.min.js Gifsicle WASM wrapper (patched)
-├── gifsicle.wasm Gifsicle binary
-├── src/
-│ └── worker.js Web Worker used by gifsicle
-└── README.md
 
-text
+```text
+gif-frame-master/
+├── manifest.json            # Chrome MV3 manifest
+├── background.js            # Service worker (opens index.html on icon click)
+├── index.html               # Main UI (6 tabs)
+├── app.js                   # All application logic
+├── icon.png                 # Extension icon
+├── gifuct-js.min.js         # GIF decoder
+├── gifshot.min.js           # GIF encoder
+├── gifsicle.min.js          # Gifsicle WASM wrapper (patched)
+├── gifsicle.wasm            # Gifsicle binary
+├── src/
+│   └── worker.js            # Web Worker used by gifsicle
+└── README.md
+```
 
 ---
 
@@ -163,20 +167,21 @@ A typical edit session:
 ## 🛠️ Development Notes
 
 - The UI is a **single-page HTML** app with no build step.
-- All logic lives in `app.js` (~3000 lines), organized into sections with clear comments.
+- All logic lives in `app.js`, organized into sections with clear comments.
 - The tab system is powered by `switchTab(name)` and `updateTabStates()`.
 - The whole app runs client-side. **No server, no tracking, no uploads.**
 
 ### Regenerate the patched `gifsicle.min.js`
 
-If you update the underlying library, you need to re-apply the patch:
+If you update the underlying library, make sure to adjust the export line from:
+```javascript
 export default gifsicle;
-
+```
+to:
+```javascript
 window.gifsicle = gifsicle;
-
-text
-
-This is the **only** change applied to the original file.
+```
+This is the **only** change applied to the original file to ensure global browser compatibility.
 
 ---
 
@@ -186,6 +191,13 @@ This is the **only** change applied to the original file.
 - **`-O2` and `-O3` are not exposed** — they are extremely slow on large GIFs (>10 MB) with negligible gains over `-O1`.
 - **Web Workers may be blocked** in Firefox when running from `file://`.
 - **Maximum output size** is capped at 4000×4000 px to avoid browser freezes.
+
+---
+
+## ☕ Support the Project
+
+If **GIF Frame Master** is useful to you and you'd like to support its development, you can buy me a coffee:
+[☕ Support with PayPal](https://paypal.me/bben)
 
 ---
 
@@ -199,7 +211,7 @@ MIT — see [LICENSE](LICENSE) for details.
 
 **Bruno** ([@cruelben](https://cruelben.github.io/))
 
-> Surviving Cobol programmer (yes, we still exist!), cryptography systems, and tech enthusiast.
+> Surviving data analyst, code automation enthusiast, and tech builder.
 
 ---
 

@@ -760,11 +760,28 @@ function openFramePreview(frameCanvas, index) {
      - Numero frame corrente + delay sotto il canvas
    ============================================================ */
 
+
+/* ============================================================
+   ANTEPRIMA ANIMATA 1:1 IN NUOVA SCHEDA (via player.html)
+   ============================================================
+   Apre player.html in una nuova scheda e gli passa i dati
+   dei frame via postMessage. Il player gestisce:
+     - canvas animato con badge #N
+     - slider per saltare a un frame
+     - pulsante Play/Stop
+     - bottoni velocità (0.25x / 0.5x / 1x)
+
+   Questa architettura è compatibile con la CSP delle
+   estensioni Chrome MV3 (niente script inline).
+   ============================================================ */
+
 function openAnimatedPreview(frames, width, height) {
 
     if (!frames || !frames.length) {
         return;
     }
+
+    /* Se troppi frame, avvisa prima di procedere */
 
     if (frames.length > 200) {
 
@@ -811,7 +828,9 @@ function openAnimatedPreview(frames, width, height) {
         return;
     }
 
-    const win = window.open("", "_blank");
+    /* Apri la nuova scheda con player.html */
+
+    const win = window.open("player.html", "_blank");
 
     if (!win) {
 
@@ -823,428 +842,51 @@ function openAnimatedPreview(frames, width, height) {
         return;
     }
 
-    win.document.title =
-        `Animated preview - ${width}×${height}`;
+    /* Aspetta che player.html sia pronto, poi invia i dati.
+       La nuova scheda ha il suo script player.js che aspetta
+       un postMessage con "type: gif-frame-master-preview".
 
-    const totalFrames = dataUrls.length;
+       Inviamo il messaggio DUE volte (a 100ms e 500ms) perché
+       non possiamo sapere esattamente quando la nuova scheda
+       ha completato il caricamento. Il player gestisce il
+       primo messaggio ricevuto e ignora eventuali duplicati. */
 
-    /* Costruisci il documento HTML della nuova scheda.
-       Il numero frame è SEMPRE visibile in alto a destra,
-       semitrasparente ma leggibile grazie a text-shadow.
-       Il player parte con velocità 0.5x (rallentato). */
-
-    const html = `
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Animated preview - ${width}×${height}</title>
-<style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: #111827;
-    color: #e5e7eb;
-    font-family: Arial, Helvetica, sans-serif;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-  }
-
-  /* Contenitore del canvas: relativo per posizionare
-     il badge overlay in alto a destra */
-
-  .player-stage {
-    position: relative;
-    display: inline-block;
-    max-width: 95vw;
-    max-height: 78vh;
-  }
-
-  canvas {
-    display: block;
-    max-width: 95vw;
-    max-height: 78vh;
-    width: auto;
-    height: auto;
-    background:
-      repeating-conic-gradient(
-        #d1d5db 0% 25%,
-        #ffffff 0% 50%
-      )
-      50% / 20px 20px;
-    image-rendering: pixelated;
-    border-radius: 6px;
-  }
-
-  /* Badge con il numero del frame corrente.
-     Sempre visibile sopra il canvas.
-     pointer-events: none per non intralciare click. */
-
-  .frame-number-badge {
-    position: absolute;
-    top: 14px;
-    right: 14px;
-
-    padding: 6px 18px;
-
-    background: rgba(0, 0, 0, 0.35);
-    border-radius: 10px;
-
-    color: rgba(255, 255, 255, 0.75);
-    font-family: monospace;
-    font-size: 44px;
-    font-weight: 700;
-    letter-spacing: 1px;
-
-    text-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.85),
-      0 0 2px rgba(0, 0, 0, 0.9);
-
-    pointer-events: none;
-    user-select: none;
-
-    transition: opacity 0.2s;
-  }
-
-  /* Quando il player è in riproduzione, il numero
-     diventa più tenue per non distrarre */
-
-  .frame-number-badge.playing {
-    color: rgba(255, 255, 255, 0.5);
-    background: rgba(0, 0, 0, 0.22);
-  }
-
-  /* Slider frame */
-
-  .slider-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 95vw;
-    max-width: 900px;
-    color: #9ca3af;
-    font-size: 13px;
-  }
-
-  .slider-row input[type="range"] {
-    flex: 1;
-    accent-color: #2563eb;
-  }
-
-  .slider-row strong {
-    color: #e5e7eb;
-    min-width: 80px;
-    text-align: right;
-  }
-
-  /* Controlli Play / info frame */
-
-  .player-controls {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    font-size: 14px;
-  }
-
-  button {
-    border: none;
-    border-radius: 7px;
-    padding: 9px 18px;
-    background: #2563eb;
-    color: #ffffff;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    transition: 0.15s;
-  }
-
-  button:hover {
-    background: #1d4ed8;
-  }
-
-  .info {
-    color: #9ca3af;
-    font-size: 13px;
-  }
-
-  .info strong {
-    color: #e5e7eb;
-  }
-
-  /* Riga velocità con bottoni preset */
-
-  .speed-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: #9ca3af;
-    font-size: 13px;
-  }
-
-  .speed-row .speed-btn {
-    background: #374151;
-    color: #e5e7eb;
-    font-weight: 600;
-    padding: 7px 14px;
-    font-size: 13px;
-  }
-
-  .speed-row .speed-btn:hover {
-    background: #4b5563;
-  }
-
-  .speed-row .speed-btn.active {
-    background: #2563eb;
-    color: #ffffff;
-  }
-</style>
-</head>
-<body>
-
-<div class="player-stage">
-  <canvas id="player"></canvas>
-
-  <div
-    class="frame-number-badge"
-    id="frameBadge"
-  >
-    #1
-  </div>
-</div>
-
-<div class="slider-row">
-  <input
-    type="range"
-    id="frameSlider"
-    min="0"
-    max="${totalFrames - 1}"
-    step="1"
-    value="0"
-  >
-  <strong id="sliderLabel">1 / ${totalFrames}</strong>
-</div>
-
-<div class="player-controls">
-  <button id="playBtn">&#9654; Play</button>
-  <div class="info">
-    Frame: <strong id="frameLabel">-</strong>
-    &nbsp;·&nbsp;
-    Delay: <strong id="delayLabel">-</strong>
-  </div>
-</div>
-
-<div class="speed-row">
-  <span>Speed:</span>
-  <button class="speed-btn" data-speed="0.25">0.25x</button>
-  <button class="speed-btn active" data-speed="0.5">0.5x</button>
-  <button class="speed-btn" data-speed="1">1x</button>
-</div>
-
-<script>
-(function() {
-
-  var framesData = ${JSON.stringify(dataUrls)};
-  var gifW = ${width};
-  var gifH = ${height};
-  var total = framesData.length;
-
-  /* Velocità di default: 0.5x (rallentato).
-     Il delay effettivo è: delay / speedMultiplier
-     Quindi con 0.5x un delay di 40ms diventa 80ms. */
-
-  var speedMultiplier = 0.5;
-
-  var canvas = document.getElementById("player");
-  var playBtn = document.getElementById("playBtn");
-  var frameLabel = document.getElementById("frameLabel");
-  var delayLabel = document.getElementById("delayLabel");
-  var slider = document.getElementById("frameSlider");
-  var sliderLabel = document.getElementById("sliderLabel");
-  var frameBadge = document.getElementById("frameBadge");
-
-  canvas.width = gifW;
-  canvas.height = gifH;
-
-  var ctx = canvas.getContext("2d");
-
-  var imgs = [];
-  var loadedCount = 0;
-  var currentIndex = 0;
-  var timerId = null;
-  var playing = false;
-
-  /* Carica tutte le immagini in memoria */
-  for (var i = 0; i < total; i++) {
-    (function(idx) {
-      var img = new Image();
-      img.onload = function() {
-        imgs[idx] = img;
-        loadedCount++;
-        if (loadedCount === total) {
-          drawFrame(0);
+    const payload = {
+        type: "gif-frame-master-preview",
+        payload: {
+            frames: dataUrls,
+            width: width,
+            height: height
         }
-      };
-      img.onerror = function() {
-        loadedCount++;
-      };
-      img.src = framesData[idx].url;
-    })(i);
-  }
+    };
 
-  /* Ridisegna il frame N e aggiorna tutti i controlli */
+    function sendPayload() {
 
-  function drawFrame(idx) {
-    if (!imgs[idx]) {
-      return;
-    }
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(imgs[idx], 0, 0);
+        try {
 
-    frameLabel.textContent = (idx + 1) + " / " + total;
-    delayLabel.textContent = framesData[idx].delay + " ms";
-    sliderLabel.textContent = (idx + 1) + " / " + total;
-    slider.value = String(idx);
-
-    /* Aggiorna il badge overlay */
-
-    frameBadge.textContent = "#" + (idx + 1);
-  }
-
-  /* Programma il frame successivo applicando speedMultiplier */
-
-  function scheduleNext() {
-    var frame = framesData[currentIndex];
-    var baseDelay = frame && frame.delay ? frame.delay : 100;
-    var effectiveDelay = Math.max(
-      10,
-      Math.round(baseDelay / speedMultiplier)
-    );
-
-    timerId = setTimeout(function() {
-      currentIndex = (currentIndex + 1) % total;
-      drawFrame(currentIndex);
-      scheduleNext();
-    }, effectiveDelay);
-  }
-
-  function play() {
-    if (playing) return;
-    playing = true;
-    playBtn.innerHTML = "&#9632; Stop";
-    frameBadge.classList.add("playing");
-    scheduleNext();
-  }
-
-  function stop() {
-    playing = false;
-    if (timerId !== null) {
-      clearTimeout(timerId);
-      timerId = null;
-    }
-    playBtn.innerHTML = "&#9654; Play";
-    frameBadge.classList.remove("playing");
-  }
-
-  playBtn.addEventListener("click", function() {
-    if (playing) {
-      stop();
-    } else {
-      play();
-    }
-  });
-
-  /* Slider: salta a un frame specifico.
-     Se l'animazione è in corso, si ferma. */
-
-  slider.addEventListener("input", function() {
-    var idx = parseInt(slider.value, 10);
-    if (!isFinite(idx) || idx < 0) idx = 0;
-    if (idx >= total) idx = total - 1;
-
-    if (playing) {
-      stop();
+            if (win && !win.closed) {
+                win.postMessage(payload, "*");
+            }
+        }
+        catch (err) {
+            console.warn("Could not send payload to player:", err);
+        }
     }
 
-    currentIndex = idx;
-    drawFrame(idx);
-  });
+    /* Tentativo 1: appena possibile */
 
-  /* Bottoni velocità */
+    setTimeout(sendPayload, 100);
 
-  var speedButtons = document.querySelectorAll(".speed-btn");
+    /* Tentativo 2: dopo mezzo secondo (fallback) */
 
-  speedButtons.forEach(function(btn) {
-    btn.addEventListener("click", function() {
-      var newSpeed = parseFloat(btn.dataset.speed);
-      if (!isFinite(newSpeed) || newSpeed <= 0) return;
+    setTimeout(sendPayload, 500);
 
-      speedMultiplier = newSpeed;
+    /* Tentativo 3: dopo un secondo (ulteriore fallback) */
 
-      /* Aggiorna classe active */
-      speedButtons.forEach(function(b) {
-        b.classList.remove("active");
-      });
-      btn.classList.add("active");
-
-      /* Se sta suonando, ferma e riavvia subito
-         con la nuova velocità */
-
-      if (playing) {
-        stop();
-        play();
-      }
-    });
-  });
-
-  /* Ferma il timer se la scheda viene chiusa */
-  window.addEventListener("beforeunload", stop);
-
-})();
-<\/script>
-
-</body>
-</html>
-`;
-
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
+    setTimeout(sendPayload, 1200);
 }
 
 
-/* ============================================================
-   DIMENSIONE MINIATURE (SLIDER)
-   ============================================================ */
-
-const thumbSizeSlider = $("thumb-size-slider");
-const thumbSizeValueLabel = $("thumb-size-value");
-
-function updateThumbSizeLabel() {
-
-    if (thumbSizeValueLabel && thumbSizeSlider) {
-        thumbSizeValueLabel.textContent =
-            thumbSizeSlider.value + "px";
-    }
-}
-
-if (thumbSizeSlider) {
-
-    thumbSizeSlider.addEventListener("input", function () {
-
-        document.documentElement.style.setProperty(
-            "--thumb-size",
-            thumbSizeSlider.value + "px"
-        );
-
-        updateThumbSizeLabel();
-    });
-
-    updateThumbSizeLabel();
-}
 
 
 /* ============================================================
