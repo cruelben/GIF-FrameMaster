@@ -32,6 +32,9 @@
 
         body {
             min-height: 100vh;
+
+            display: flex;
+            flex-direction: column;
         }
 
         /* =====================================================
@@ -200,6 +203,8 @@
             max-width: 1500px;
             margin: 0 auto;
             padding: 25px;
+
+            flex: 1 0 auto;
         }
 
         /* =====================================================
@@ -1508,6 +1513,105 @@
         }
 
         /* =====================================================
+           APP FOOTER
+        ===================================================== */
+
+        .app-footer {
+            width: 100%;
+
+            padding: 18px 25px;
+
+            background: #0b1120;
+
+            border-top: 1px solid #374151;
+
+            color: #9ca3af;
+            font-size: 12px;
+
+            flex-shrink: 0;
+        }
+
+        .app-footer-inner {
+            max-width: 1500px;
+            margin: 0 auto;
+
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+
+            gap: 12px;
+        }
+
+        .footer-brand {
+            color: #9ca3af;
+        }
+
+        .footer-brand strong {
+            color: #e5e7eb;
+            font-weight: 600;
+        }
+
+        .footer-support {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+
+            gap: 8px;
+
+            color: #9ca3af;
+        }
+
+        .footer-support-label {
+            margin-right: 4px;
+        }
+
+        .support-link {
+            display: inline-flex;
+            align-items: center;
+
+            gap: 5px;
+
+            padding: 5px 12px;
+
+            border-radius: 6px;
+
+            color: #ffffff;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+
+            transition: 0.15s;
+        }
+
+        .support-link.kofi {
+            background: #ff5e5b;
+        }
+
+        .support-link.kofi:hover {
+            background: #ff7a77;
+        }
+
+        .support-link.paypal {
+            background: #0070ba;
+        }
+
+        .support-link.paypal:hover {
+            background: #0091ea;
+        }
+
+        .footer-github {
+            color: #9ca3af;
+            text-decoration: none;
+            font-size: 12px;
+            transition: 0.15s;
+        }
+
+        .footer-github:hover {
+            color: #60a5fa;
+        }
+
+        /* =====================================================
            SCROLLBAR
         ===================================================== */
 
@@ -1591,6 +1695,15 @@
             .export-comparison td {
                 padding: 8px 10px;
                 font-size: 12px;
+            }
+
+            .app-footer-inner {
+                justify-content: center;
+                text-align: center;
+            }
+
+            .footer-support {
+                justify-content: center;
             }
         }
     </style>
@@ -2956,6 +3069,59 @@
 
 
     </main>
+
+
+    <!-- =====================================================
+         APP FOOTER
+    ====================================================== -->
+
+    <footer class="app-footer">
+
+        <div class="app-footer-inner">
+
+            <div class="footer-brand">
+                <strong>GIF Frame Master</strong>
+                · Made by cruelben
+            </div>
+
+            <div class="footer-support">
+
+                <span class="footer-support-label">
+                    Support the project:
+                </span>
+
+                <a
+                    class="support-link kofi"
+                    href="https://ko-fi.com/cruelben"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    ☕ Ko-fi
+                </a>
+
+                <a
+                    class="support-link paypal"
+                    href="https://paypal.me/bben"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    💳 PayPal
+                </a>
+
+            </div>
+
+            <a
+                class="footer-github"
+                href="https://cruelben.github.io/"
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                cruelben.github.io
+            </a>
+
+        </div>
+
+    </footer>
 
 
     <!-- =====================================================
